@@ -28,6 +28,7 @@ Design / planning. Implementation not yet started. See:
 - [`PRICING.md`](PRICING.md) — where model pricing comes from
 - [`GAPS.md`](GAPS.md) — gap analysis & design adjustments
 - [`IMPLEMENTATION.md`](IMPLEMENTATION.md) — task breakdown
+- [`FEEDS.md`](FEEDS.md) — data feed sources for every input
 
 ## Scope
 

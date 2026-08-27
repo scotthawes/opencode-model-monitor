@@ -44,19 +44,29 @@ config fixes — otherwise typos, project pins, and subagent spawns slip through
   via `bus.js` on any price change / new / removed model.
 - **`budget.json`** (new, user-specific) — declares the plan and caps per window
   (e.g. `$12/5h`, `$30/week`, `$60/month` for the Go plan — confirm actual
-  numbers) plus the free-tier fallback models. This is the only manually-set
-  piece; everything else is derived.
+  numbers) plus the free-tier fallback models, plus optional expected caps for
+  cross-checking the usage API. The actual enforced caps now come from the
+  /zen/go/v1/usage API (see FEEDS.md #5), so this file is policy, not the
+  source of truth for limits.
 
 ## 2. Live budget meter → `budget-service` daemon
 
 A long-running service (not a per-request script) that:
 
-- Reads `opencode.db` (`~/.local/share/opencode/opencode.db`) for finalized
-  session cost, aggregated over rolling windows (5h / week / month).
+- **Authoritative quota from the usage API** — polls
+  `GET https://opencode.ai/zen/go/v1/usage` (Bearer key from `auth.json`,
+  cached ~5 min) for the server-enforced Go quota per window
+  (`rolling` / `weekly` / `monthly` `percent` + `resetsAt`). This is
+  cross-device and matches what opencode.ai actually enforces — the local DB
+  cannot see other machines' spend (see FEEDS.md #5).
+- **Supplementary detail from `opencode.db`**
+  (`~/.local/share/opencode/opencode.db`, `session` table) for per-model /
+  per-agent cost breakdown and history on this machine.
 - Holds **in-flight reservations** so concurrent subagent spawns can't all see
   "budget OK" before any cost has landed (see GAPS #1).
 - Computes state per window: `OK → WARNING (>80%) → CRITICAL (>95%) →
-  EXHAUSTED (≥100%)`.
+  EXHAUSTED (≥100%)`, preferring the API `percent` when available and falling
+  back to locally-aggregated spend otherwise.
 - **Publishes state to the bus** so every session observes one truth (no racing
   local copies).
 - Exposes a fast local check (socket / file) for the thin hook to call.
