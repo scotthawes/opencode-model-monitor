@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  launchd LaunchAgent template for opencode-model-monitor.
+
+  BEFORE USE: replace every /PATH/TO/opencode-model-monitor with the absolute
+  path to this repo (e.g. /Users/you/model-budget-guard). The easiest way is to
+  run the bundled installer:  bash scripts/install-macos.sh
+-->
+<dict>
+  <key>Label</key>
+  <string>com.opencode.model-monitor</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>bash</string>
+    <string>-c</string>
+    <string>cd /PATH/TO/opencode-model-monitor &amp;&amp; npm run monitor</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/PATH/TO/opencode-model-monitor/state/monitor.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/PATH/TO/opencode-model-monitor/state/monitor.err.log</string>
+
+  <key>WorkingDirectory</key>
+  <string>/PATH/TO/opencode-model-monitor</string>
+</dict>
+</plist>

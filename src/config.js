@@ -51,6 +51,17 @@ function loadConfig(configPath) {
     delivery.webhook = userConfig.delivery.webhook;
   }
 
+  // Environment overrides win over config.json (and defaults).
+  if (
+    process.env.MODEL_MONITOR_DESKTOP === '1' ||
+    process.env.MODEL_MONITOR_DESKTOP === 'true'
+  ) {
+    delivery.desktop = true;
+  }
+  if (process.env.MODEL_MONITOR_WEBHOOK) {
+    delivery.webhook = process.env.MODEL_MONITOR_WEBHOOK;
+  }
+
   const scanRoots =
     Array.isArray(userConfig.scanRoots) && userConfig.scanRoots.length
       ? userConfig.scanRoots.map((p) => path.resolve(p))
