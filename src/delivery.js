@@ -19,6 +19,88 @@ function track(p) {
   return p;
 }
 
+// --- Cross-source model_change dedup ---------------------------------------
+//
+// price-watch (api.json diff) and atom-watch (Go/Zen docs feeds + releases)
+// can both emit a `model_change` alert for the SAME underlying event (e.g.
+// "Added model: qwen3.8-flash" and "docs(go): add Qwen3.8 Flash (#45836)").
+// We collapse them to a single alert within a TTL window by deriving a stable
+// dedup key from the known model id referenced in the alert text.
+
+// Set of known model ids (from the price-watch catalog), populated via
+// setKnownModelIds(). Used to recognize which model a given alert is about.
+let knownModelIds = new Set();
+
+// In-memory dedup store: key -> timestamp (ms). Persisted to dedup.json.
+let dedupStore = new Map();
+
+// Default TTL for suppressing duplicate model_change alerts (24h).
+let dedupTtlMs = 86400000;
+
+// Directory the dedup store is persisted to (defaults to STATE_DIR at call time).
+let DEDUP_DIR = null;
+
+function setKnownModelIds(set) {
+  knownModelIds = set instanceof Set ? set : new Set(Array.isArray(set) ? set : []);
+}
+
+// Normalize text for matching: lowercase + strip everything except alnum.
+function normalize(text) {
+  return String(text == null ? '' : text).toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+// Compute a dedup key for a model_change alert. Returns null when the alert
+// does not reference a known model id (no dedup in that case).
+function computeDedupKey(title, message) {
+  if (!knownModelIds.size) return null;
+  const text = normalize(`${title || ''} ${message || ''}`);
+  if (!text) return null;
+  // Prefer the longest known id whose normalized form appears in the text,
+  // so e.g. "qwen3.8-flash" wins over a shorter ambiguous prefix.
+  let bestId = null;
+  let bestNorm = '';
+  for (const id of knownModelIds) {
+    const n = normalize(id);
+    if (!n) continue;
+    if (text.includes(n) && n.length > bestNorm.length) {
+      bestId = id;
+      bestNorm = n;
+    }
+  }
+  return bestId ? 'model:' + bestNorm : null;
+}
+
+function dedupPath() {
+  return path.join(DEDUP_DIR || STATE_DIR || path.join(__dirname, '..', 'state'), 'dedup.json');
+}
+
+function loadDedup() {
+  try {
+    const raw = fs.readFileSync(dedupPath(), 'utf8');
+    const obj = JSON.parse(raw) || {};
+    dedupStore = new Map(Object.entries(obj));
+  } catch (_) {
+    // Missing/corrupt store is fine — start empty.
+    dedupStore = new Map();
+  }
+}
+
+function saveDedup() {
+  try {
+    fs.writeFileSync(dedupPath(), JSON.stringify(Object.fromEntries(dedupStore), null, 2));
+  } catch (_) {
+    // best effort
+  }
+}
+
+// Initialize the persistent dedup store. Called by monitor at the start of
+// each cycle (or once before a single run) with the state directory and opts.
+function init(stateDir, opts) {
+  if (stateDir) DEDUP_DIR = stateDir;
+  if (opts && typeof opts.dedupTtlMs === 'number') dedupTtlMs = opts.dedupTtlMs;
+  loadDedup();
+}
+
 // Wait for all in-flight delivery promises to settle. Safe to call multiple
 // times; resolves once nothing is pending.
 async function flush() {
@@ -58,6 +140,22 @@ function ts() {
 // level: info | model_change | warning | critical
 async function alert(level, title, message) {
   ensureConfig();
+
+  // Dedup cross-source model_change alerts within the TTL window. Other
+  // levels (info/config pins, warning, critical) are delivered as-is.
+  if (level === 'model_change') {
+    const key = computeDedupKey(title, message);
+    if (key) {
+      const now = Date.now();
+      const prev = dedupStore.get(key);
+      if (prev != null && now - prev < dedupTtlMs) {
+        return; // suppressed — already alerted for this model within TTL
+      }
+      dedupStore.set(key, now);
+      saveDedup();
+    }
+  }
+
   const line = `[${ts()}] ${String(level).toUpperCase()} | ${title} | ${message}`;
 
   if (CONFIG.stdout) {
@@ -208,4 +306,12 @@ function writeReport(report) {
   }
 }
 
-module.exports = { configure, alert, flush, writeReport, renderMarkdown };
+module.exports = {
+  configure,
+  alert,
+  flush,
+  writeReport,
+  renderMarkdown,
+  init,
+  setKnownModelIds
+};

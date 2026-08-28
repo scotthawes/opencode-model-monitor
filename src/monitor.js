@@ -21,6 +21,7 @@ async function main() {
   let latestModels = {};
 
   async function cycle() {
+    delivery.init(stateDir, { dedupTtlMs: 86400000 });
     await delivery.alert('info', 'Monitor cycle started', new Date().toISOString());
 
     const pricing = await runPriceWatch(stateDir).catch((e) => ({
@@ -30,6 +31,7 @@ async function main() {
     }));
     const modelsMap = (pricing && pricing.models) || {};
     latestModels = modelsMap;
+    delivery.setKnownModelIds(new Set(Object.keys(modelsMap)));
 
     const usage = await runUsage(config.authJsonPath, config.thresholds).catch((e) => ({
       status: 'unknown',
