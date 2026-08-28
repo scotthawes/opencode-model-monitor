@@ -14,9 +14,8 @@
 	<key>ProgramArguments</key>
 	<array>
 		<string>/usr/bin/env</string>
-		<string>bash</string>
-		<string>-c</string>
-		<string>cd /PATH/TO/opencode-model-monitor &amp;&amp; npm run monitor</string>
+		<string>node</string>
+		<string>src/monitor.js</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
