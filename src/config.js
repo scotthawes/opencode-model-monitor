@@ -21,7 +21,12 @@ const DEFAULTS = {
     webhook: null
   },
   scanRoots: [process.cwd()],
-  authJsonPath: path.join(os.homedir(), '.local', 'share', 'opencode', 'auth.json')
+  authJsonPath: path.join(os.homedir(), '.local', 'share', 'opencode', 'auth.json'),
+  feeds: {
+    goPricing: 'https://github.com/anomalyco/opencode/commits/dev/packages/web/src/content/docs/go.mdx.atom',
+    zenPricing: 'https://github.com/anomalyco/opencode/commits/dev/packages/web/src/content/docs/zen.mdx.atom',
+    releases: 'https://github.com/anomalyco/opencode/releases.atom'
+  }
 };
 
 // Loads config.json (if present) merged over built-in defaults.
@@ -58,7 +63,8 @@ function loadConfig(configPath) {
     scanRoots,
     authJsonPath: userConfig.authJsonPath
       ? path.resolve(userConfig.authJsonPath)
-      : DEFAULTS.authJsonPath
+      : DEFAULTS.authJsonPath,
+    feeds: Object.assign({}, DEFAULTS.feeds, userConfig.feeds || {})
   };
 }
 

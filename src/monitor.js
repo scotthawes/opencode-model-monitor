@@ -7,6 +7,7 @@ const delivery = require('./delivery');
 const { runPriceWatch } = require('./price-watch');
 const { runUsage } = require('./usage');
 const { runConfigScan } = require('./config-scan');
+const { runAtomWatch } = require('./atom-watch');
 
 async function main() {
   const config = loadConfig();
@@ -42,11 +43,25 @@ async function main() {
       delivery.alert('warning', 'config-scan failed', String(e && e.message ? e.message : e));
     }
 
+    const feedUpdates = [];
+    try {
+      const feeds = config.feeds || {};
+      const results = await Promise.all([
+        runAtomWatch(stateDir, 'goPricing', feeds.goPricing),
+        runAtomWatch(stateDir, 'zenPricing', feeds.zenPricing),
+        runAtomWatch(stateDir, 'releases', feeds.releases)
+      ]);
+      for (const r of results) feedUpdates.push(r);
+    } catch (e) {
+      delivery.alert('warning', 'atom-watch failed', String(e && e.message ? e.message : e));
+    }
+
     const report = {
       generatedAt: new Date().toISOString(),
       pricing,
       usage,
-      pins
+      pins,
+      feedUpdates
     };
     delivery.writeReport(report);
     delivery.alert('info', 'Monitor cycle complete', new Date().toISOString());
@@ -86,12 +101,31 @@ async function main() {
     }
   }, c.db);
 
-  // NOTE: atom/releases feeds are deferred to a later phase; cadence entries
-  // remain configurable but are intentionally not polled yet.
+  // Atom feeds: Go + Zen pricing docs commits on the atom cadence, releases on
+  // the (slower) releases cadence. Each call is idempotent via persisted seenIds.
+  setInterval(() => {
+    runAtomWatch(stateDir, 'goPricing', config.feeds.goPricing).catch((e) =>
+      delivery.alert('warning', 'atom-watch failed: goPricing', String(e && e.message ? e.message : e))
+    );
+  }, c.atom);
+
+  setInterval(() => {
+    runAtomWatch(stateDir, 'zenPricing', config.feeds.zenPricing).catch((e) =>
+      delivery.alert('warning', 'atom-watch failed: zenPricing', String(e && e.message ? e.message : e))
+    );
+  }, c.atom);
+
+  setInterval(() => {
+    runAtomWatch(stateDir, 'releases', config.feeds.releases).catch((e) =>
+      delivery.alert('warning', 'atom-watch failed: releases', String(e && e.message ? e.message : e))
+    );
+  }, c.releases);
+
   delivery.alert(
     'info',
     'Monitor running (continuous)',
-    `usage every ${c.usage}ms, pricing every ${c.pricing}ms, config-scan every ${c.db}ms`
+    `usage every ${c.usage}ms, pricing every ${c.pricing}ms, config-scan every ${c.db}ms, ` +
+      `atom feeds every ${c.atom}ms, releases every ${c.releases}ms`
   );
 }
 
