@@ -131,6 +131,69 @@ built-in defaults; missing keys keep their default value.
 }
 ```
 
+## Notifications
+
+Alerts are always written to `state/alerts.log` and the local report files. You
+can optionally enable richer delivery channels:
+
+- **Desktop notifications** — pop a native OS notification on each alert.
+  1. Install the dependency: `npm install` (pulls `node-notifier`).
+  2. Enable via `config.json`:
+     ```json
+     { "delivery": { "desktop": true } }
+     ```
+     …or via environment variable (no config edit needed):
+     ```bash
+     MODEL_MONITOR_DESKTOP=1 npm run monitor
+     ```
+  The channel is best-effort: if `node-notifier` is missing it is silently
+  skipped, and a failed notification never breaks the monitor.
+
+- **Webhook** — `POST` a JSON alert to any URL (Slack/Discord/custom). Payload:
+  ```json
+  { "level": "info|warning|critical|model_change",
+    "title": "...", "message": "...",
+    "ts": "2026-01-01T00:00:00.000Z" }
+  ```
+  Enable via `config.json`:
+  ```json
+  { "delivery": { "webhook": "https://hooks.slack.com/services/XXX/YYY/ZZZ" } }
+  ```
+  …or via environment variable:
+  ```bash
+  MODEL_MONITOR_WEBHOOK="https://hooks.slack.com/services/XXX/YYY/ZZZ" npm run monitor
+  ```
+  A failing `POST` is caught and logged as a best-effort miss — it never throws.
+
+A ready-to-edit template lives at [`config.example.json`](config.example.json).
+
+## Run continuously
+
+For background operation, run the monitor detached or install it as a service:
+
+```bash
+# Simple background job (dies with the shell unless nohup/disown used):
+npm run monitor &
+
+# macOS — launchd LaunchAgent (starts on login, auto-restarts):
+bash scripts/install-macos.sh
+# Manual alternative:
+#   cp deploy/opencode-model-monitor.plist ~/Library/LaunchAgents/com.opencode.model-monitor.plist
+#   # edit the placeholder /PATH/TO/opencode-model-monitor to the real repo path
+#   launchctl load ~/Library/LaunchAgents/com.opencode.model-monitor.plist
+
+# Linux — systemd user service (starts on login, auto-restarts):
+#   mkdir -p ~/.config/systemd/user
+#   # edit deploy/opencode-model-monitor.service: replace
+#   #   /PATH/TO/opencode-model-monitor with the real repo path
+#   cp deploy/opencode-model-monitor.service ~/.config/systemd/user/
+#   systemctl --user enable --now opencode-model-monitor.service
+```
+
+The `deploy/` templates use a `/PATH/TO/opencode-model-monitor` placeholder —
+substitute the real absolute repo path. `scripts/install-macos.sh` does this for
+you automatically.
+
 What it watches (Phase 1):
 
 1. **Pricing** — polls `https://models.opencode.ai/api.json` with an

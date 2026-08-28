@@ -1,0 +1,7 @@
+{
+  "delivery": {
+    "desktop": true,
+    "webhook": "https://hooks.slack.com/services/XXX/YYY/ZZZ"
+  },
+  "scanRoots": ["/abs/path/to/your/project"]
+}

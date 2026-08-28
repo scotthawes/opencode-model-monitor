@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenCode Model Monitor (passive budget/pricing/usage watcher)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Replace /PATH/TO/opencode-model-monitor with the absolute path to the repo.
+WorkingDirectory=/PATH/TO/opencode-model-monitor
+ExecStart=/usr/bin/env npm run monitor
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

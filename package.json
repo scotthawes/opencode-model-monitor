@@ -21,7 +21,7 @@
   "engines": {
     "node": ">=18"
   },
-  "optionalDependencies": {
+  "dependencies": {
     "node-notifier": "^10.0.1"
   }
 }
