@@ -60,6 +60,9 @@ A standalone Node.js CLI (CommonJS). It has **no dependency on opencode-platform
 and works for any OpenCode user. It only reads stock OpenCode data
 (`api.json`, the `/zen/go/v1/usage` API, `auth.json`, and project
 `.opencode/opencode.json` files) and never rewrites or blocks a model request.
+Pricing/announcement changes may also surface via the Go/Zen docs Atom feeds
+(`go.mdx.atom` / `zen.mdx.atom`) and `releases.atom`, which the monitor watches
+(idempotently, via ETag + seen-entry tracking).
 
 ### Install
 
@@ -112,9 +115,9 @@ built-in defaults; missing keys keep their default value.
   "cadenceMs": {
     "usage": 300000,     // usage/quota poll (5 min)
     "pricing": 1800000,  // pricing catalog poll (30 min)
-    "atom": 1800000,     // (reserved)
+    "atom": 1800000,     // Go/Zen pricing docs Atom feeds
     "db": 600000,        // config-scan poll (10 min)
-    "releases": 86400000 // (reserved, daily)
+    "releases": 86400000 // releases.atom (daily)
   },
   "delivery": {
     "logFile": true,     // write state/alerts.log

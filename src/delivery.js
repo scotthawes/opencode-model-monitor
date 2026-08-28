@@ -137,6 +137,32 @@ function renderMarkdown(report) {
     }
   }
   lines.push('');
+
+  // Feed updates (Atom: Go/Zen pricing docs + releases)
+  lines.push('## Feed updates');
+  lines.push('');
+  const feeds = Array.isArray(report.feedUpdates) ? report.feedUpdates : [];
+  if (!feeds.length) {
+    lines.push('No feed checks performed.');
+  } else {
+    for (const f of feeds) {
+      const key = f.key || '?';
+      const entries = Array.isArray(f.newEntries) ? f.newEntries : [];
+      if (!entries.length) {
+        lines.push(`- **${key}**: no updates`);
+      } else {
+        // Most recent entry by its `updated` timestamp.
+        let latest = entries[0];
+        for (const e of entries) {
+          if ((e.updated || '') > (latest.updated || '')) latest = e;
+        }
+        const when = latest.updated ? ` (${latest.updated})` : '';
+        lines.push(`- **${key}**: ${latest.title}${when}`);
+      }
+    }
+  }
+  lines.push('');
+
   return lines.join('\n');
 }
 
