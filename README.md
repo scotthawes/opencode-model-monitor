@@ -1,4 +1,4 @@
-# model-budget-guard
+# opencode-model-monitor
 
 A **passive monitoring microservice** for OpenCode hosted models — the
 `opencode-go` ("Go") provider on `opencode.ai`. It observes and reports; it
@@ -12,7 +12,8 @@ and surface **alerts/reports** — observation only, no control. The service:
 1. Polls the documented data feeds (see `FEEDS.md`) for model pricing and price
    changes, usage/quota via the `/zen/go/v1/usage` API, agent model pins across
    project `.opencode/opencode.json` files, and local spend from `opencode.db`.
-2. Reports and alerts via the bus, logs, and/or a dashboard.
+2. Reports and alerts via the bus, logs, and/or a dashboard — including an
+   alert whenever a model changes (price, addition, removal, or tier change).
 3. **Does not** intercept or rewrite model requests, downgrade/block models, or
    enforce any routing policy on the orchestrator or subagents. All control
    behavior is deferred to a future phase (if ever).

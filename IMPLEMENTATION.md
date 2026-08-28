@@ -45,9 +45,26 @@ project GitHub workflow (issue → branch → PR → merge on green; no force-pu
       (Closes #12.)
 - [ ] Optional: `zen.mdx` / `go.mdx` git-history watcher for discount notes.
 
-## Open questions (monitoring thresholds / alerting, not control)
-1. Actual allowance numbers & windows (confirm Go plan caps or custom) — *for
-   setting alert thresholds.*
-2. At what `percent` should WARNING / CRITICAL alerts fire (default 80% / 95%)?
-3. Alert delivery: bus only, logs, dashboard, or all three?
-4. Policy ceiling — report any agent pin above a $/1M threshold (e.g. vs `hy3`)?
+## Requirements — what the monitor must answer
+
+Derived from the monitoring-only scope (no control):
+
+1. **Model-change alerts.** Whenever a model changes — price change, new model
+   added, model removed, or a tier / context-window price change — send an alert
+   (bus event + log; surfaced on the dashboard). Sources: `price-watch` diff on
+   `api.json`, plus the GitHub `go.mdx` / `zen.mdx` Atom feeds for published
+   pricing edits.
+2. **Report all allowances / quotas.** The service must surface *every* allowance
+   and quota dimension it can observe, including:
+   - Go-plan quota windows: `rolling` / `weekly` / `monthly` percent, status,
+     resetsAt (from `/zen/go/v1/usage`).
+   - Per-model and per-agent spend (local `opencode.db`).
+   - Config pins: each agent's pinned model with its USD-per-1M cost and
+     multiplier versus `hy3` (report-only).
+   - Free-tier model availability (`opencode` provider `-free` models).
+   - A pricing-catalog snapshot (current `api.json`).
+3. **Status thresholds.** At what percent should WARNING / CRITICAL fire
+   (default 80% / 95%)? Used for quota *reporting* only — no action taken.
+4. **Alert delivery channels.** Bus events, logs, dashboard, or all three?
+5. **Cadence.** Poll interval per feed (pricing 15-60 min, usage ~5 min, Atom
+   feeds 15-60 min) — tune for cheapness.

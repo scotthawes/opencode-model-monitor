@@ -130,10 +130,21 @@ CRITICAL/EXHAUSTED; it never changes what model a session uses.
 
 ## 5. Visibility & alerts
 
-- `npm run budget` — dashboard: spend vs caps (5h/week/month), per-model $/1M,
+- **Alerts on model change.** Whenever a model changes — price change, new model
+  added, model removed, or a tier/context-window price change — an alert is sent
+  (bus event + log; surfaced on the dashboard). Driven by `price-watch` diffing
+  `api.json`, cross-checked against the GitHub `go.mdx` / `zen.mdx` Atom feeds.
+- **Report all allowances / quotas.** The service surfaces *every* allowance and
+  quota dimension it can observe, not just one: Go-plan `rolling` / `weekly` /
+  `monthly` quota (`percent`, `status`, `resetsAt` from `/zen/go/v1/usage`);
+  per-model and per-agent spend (local `opencode.db`); config pins with
+  USD-per-1M cost and multiplier vs `hy3` (report-only); free-tier model
+  availability; and a pricing-catalog snapshot. Nothing is hidden behind a control
+  action.
+- `npm run budget` — dashboard: spend vs caps (5h/week/month), per-model USD-per-1M,
   top-cost agents, recommended actions.
-- `bus.js` alerts on: WARNING / CRITICAL / EXHAUSTED, price changes,
-  policy-violating pins.
+- `bus.js` alerts on: WARNING / CRITICAL / EXHAUSTED (quota reporting only),
+  model changes, expensive config pins.
 
 ## Key design decision carried from gap analysis
 
