@@ -35,6 +35,23 @@ if [ -f "$DEST" ]; then
 else
   # Substitute the real repo path for the placeholder.
   sed "s#/PATH/TO/opencode-model-monitor#$REPO_DIR#g" "$SRC" > "$DEST"
+
+  # Ensure node resolves via the plist's EnvironmentVariables.PATH.
+  # launchd does NOT inherit the user's login PATH, so if the installer can
+  # locate `node` but its directory is missing from the plist PATH, prepend it.
+  # This keeps the monitor robust against the exit-127 (npm-not-on-PATH) bug.
+  NODE_BIN="$(command -v node 2>/dev/null || true)"
+  if [ -n "$NODE_BIN" ]; then
+    NODE_DIR="$(dirname "$NODE_BIN")"
+    if ! grep -qF "$NODE_DIR" "$DEST"; then
+      echo "Prepending node dir to plist PATH: $NODE_DIR"
+      sed -i '' -E "s#(/usr/bin:/bin:/usr/sbin:/sbin</string>)#$NODE_DIR:\1#" "$DEST"
+    fi
+  else
+    echo "WARNING: 'node' not found on PATH — the agent may fail to start."
+    echo "         Install Node.js, then re-run this script."
+  fi
+
   echo "Installed plist to $DEST"
 
   echo "Loading agent (best-effort)..."

@@ -45,9 +45,14 @@ Clone and run; alerts start immediately for any OpenCode Go-plan user. No
 ```bash
 git clone https://github.com/scotthawes/opencode-model-monitor
 cd opencode-model-monitor
-npm install            # optional: enables desktop notifications
-npm run monitor       # continuous; writes alerts to state/alerts.log + state/report.md
+node src/monitor.js --once   # single check, then exit
+node src/monitor.js          # continuous; writes alerts to state/alerts.log + state/report.md
 ```
+
+> `npm run monitor:once` / `npm run monitor` work too, but they require `npm`
+> on PATH. The `node` commands above only need Node itself.
+
+`npm install` (optional) enables desktop notifications via `node-notifier`:
 
 You'll get alerts (in `state/alerts.log` and `state/report.md`) when:
 
