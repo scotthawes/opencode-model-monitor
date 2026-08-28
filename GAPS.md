@@ -80,7 +80,7 @@ Needs dry-run + tests.
 If `api.json` is unreachable, fall back to last snapshot + safe default — don't
 crash or falsely block.
 
-**12. Hardcoded tiers in `cost-tracker.js` [LOW]**
+**12. Hardcoded tier list [LOW]**
 Its model→tier list is static and rots as models change. Derive tiers from the
 live catalog.
 
@@ -88,7 +88,8 @@ live catalog.
 
 Replace the stateless "script + hook" with a **`budget-service` daemon** that:
 aggregates spend from the DB (+ multiple DBs if needed) + holds in-flight
-reservations; publishes state to the **bus** (one truth, no racing); exposes a
+reservations; publishes state to its log / notifier / report file (one truth, no
+racing); exposes a
 fast local check the thin hook calls to reserve/approve/downgrade; handles
 provider-switch to free-tier and context-window tiers.
 

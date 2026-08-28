@@ -10,14 +10,14 @@ project GitHub workflow (issue → branch → PR → merge on green; no force-pu
 
 ## Phase 1 — Source of truth
 - [ ] **`price-watch.js`** — fetch `api.json`, snapshot `opencode-go` costs,
-      diff, alert via bus. (Closes PRICING primary source.)
+       diff, alert via log / notifier / webhook. (Closes PRICING primary source.)
 - [ ] **`budget.json`** schema + loader — plan, caps per window, free-tier
       fallback list. (User supplies actual numbers.)
 
 ## Phase 2 — Budget meter / monitoring service
 - [ ] **`budget-service` daemon (monitoring)** — poll `/zen/go/v1/usage` for
       quota + aggregate `opencode.db` spend over rolling windows (read-only);
-      OK/WARNING/CRITICAL/EXHAUSTED state; publish state to bus; report/alert.
+       OK/WARNING/CRITICAL/EXHAUSTED state; publish state to log / notifier / report file; report/alert.
       **No in-flight reservations, no local check endpoint, no control.** (Closes
       #5, #6, #7, #8, #9 for monitoring accuracy.)
 - [ ] Confirm DB topology (single shared vs many) before finalizing.
@@ -26,7 +26,7 @@ project GitHub workflow (issue → branch → PR → merge on green; no force-pu
 > Not built in the monitoring phase. The system does not intervene in sessions.
 - [ ] **`budget-guard` plugin** (`model.request` hook) — would thin-check the
       service; downgrade to `hy3` at CRITICAL; switch to free-tier provider at
-      EXHAUSTED; log overrides to bus. **Deferred** (was #2).
+       EXHAUSTED; log overrides to the log file / report. **Deferred** (was #2).
 - [ ] **Override allowlist** — `@premium` / per-task bypass. **Deferred** (was #4).
 
 ## Phase 4 — Smart selection (model-select DEFERRED) / Config audit (REPORT-ONLY)
@@ -38,10 +38,11 @@ project GitHub workflow (issue → branch → PR → merge on green; no force-pu
       pins. (Active; the *reporting* half of the original #3.)
 
 ## Phase 5 — Visibility & hardening
-- [ ] **`npm run budget`** dashboard.
+- [ ] **`npm run report`** — bundled report command (reads local state; the project's
+      own report, not the platform's `npm run budget`).
 - [ ] **Dry-run / audit mode** + tests. (Closes #10.)
 - [ ] **Source-down fallback** to last snapshot. (Closes #11.)
-- [ ] **Dynamic tiers** from catalog (drop `cost-tracker.js` hardcoded list).
+- [ ] **Dynamic tiers** from catalog        (drop hardcoded tier list).
       (Closes #12.)
 - [ ] Optional: `zen.mdx` / `go.mdx` git-history watcher for discount notes.
 
@@ -51,7 +52,7 @@ Derived from the monitoring-only scope (no control):
 
 1. **Model-change alerts.** Whenever a model changes — price change, new model
    added, model removed, or a tier / context-window price change — send an alert
-   (bus event + log; surfaced on the dashboard). Sources: `price-watch` diff on
+    (log file + notifier/webhook; surfaced on the report command). Sources: `price-watch` diff on
    `api.json`, plus the GitHub `go.mdx` / `zen.mdx` Atom feeds for published
    pricing edits.
 2. **Report all allowances / quotas.** The service must surface *every* allowance
@@ -65,6 +66,7 @@ Derived from the monitoring-only scope (no control):
    - A pricing-catalog snapshot (current `api.json`).
 3. **Status thresholds.** At what percent should WARNING / CRITICAL fire
    (default 80% / 95%)? Used for quota *reporting* only — no action taken.
-4. **Alert delivery channels.** Bus events, logs, dashboard, or all three?
+ 4. **Alert delivery channels.** log file (always), stdout, desktop notification
+    (cross-platform via node-notifier), and/or webhook (Slack/Discord/custom URL)?
 5. **Cadence.** Poll interval per feed (pricing 15-60 min, usage ~5 min, Atom
    feeds 15-60 min) — tune for cheapness.

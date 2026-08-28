@@ -46,7 +46,7 @@ watch, e.g. Atom/RSS via a reader or cron). "Verified" means curl-tested live.
 - **#7 `releases.atom`** — machine-readable changelog; no separate blog/changelog
   RSS exists (`opencode.ai/changelog` is HTML only).
 
-## Local feeds (filesystem / DB / bus)
+## Local feeds (filesystem / DB / monitor output)
 
 | # | Data need | Feed | Transport | Format | Cadence | Verified |
 |---|-----------|------|-----------|--------|---------|----------|
@@ -54,7 +54,7 @@ watch, e.g. Atom/RSS via a reader or cron). "Verified" means curl-tested live.
 | 9 | Agent model pins (config) | all `.opencode/opencode.json` (global + every project) → `agent.<name>.model` | filesystem watch (fswatch/inotify) or scan | JSON | on change / 15 min | ✅ dirs exist |
 | 10 | Budget policy / allowance definition | `~/.config/opencode/budget.json` (plan, caps, free-tier fallback, thresholds) | filesystem watch | JSON | on change | to be created |
 | 11 | Usage API key | `~/.local/share/opencode/auth.json` → `opencode-go` | read at startup + watch | JSON | on change | ✅ present |
-| 12 | Cross-session events / alerts | `bus.js` (the platform message bus) | subscribe | JSON over bus | realtime | ✅ present |
+| 12 | Monitor output (alerts / reports) | log file (`~/.local/share/model-budget-guard/alerts.log`), desktop notification (`node-notifier`), and/or report file (`report.json` / `report.md`) | write | file / notification | realtime | bundled with project |
 
 ## Gaps / non-feeds
 
@@ -78,5 +78,5 @@ releases.atom ──────────subscribe► announcement alerts
 opencode.db session ──poll────► budget-service  ◄── supplementary detail
 budget.json / config pins ────► budget-service + config-audit
 
-budget-service ──publish──► bus  ──► budget-guard hook + npm run budget
+budget-service ──publish──► log / notifier / report file  ──► npm run report
 ```

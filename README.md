@@ -12,8 +12,11 @@ and surface **alerts/reports** — observation only, no control. The service:
 1. Polls the documented data feeds (see `FEEDS.md`) for model pricing and price
    changes, usage/quota via the `/zen/go/v1/usage` API, agent model pins across
    project `.opencode/opencode.json` files, and local spend from `opencode.db`.
-2. Reports and alerts via the bus, logs, and/or a dashboard — including an
-   alert whenever a model changes (price, addition, removal, or tier change).
+ 2. Reports and alerts via a log file (always on), stdout, optional desktop
+    notification (cross-platform, e.g. `node-notifier`), and/or a webhook
+    (Slack/Discord/custom URL) — plus a local report file (JSON/Markdown) read by
+    the bundled `npm run report` command — including an alert whenever a model
+    changes (price, addition, removal, or tier change).
 3. **Does not** intercept or rewrite model requests, downgrade/block models, or
    enforce any routing policy on the orchestrator or subagents. All control
    behavior is deferred to a future phase (if ever).
@@ -41,6 +44,11 @@ Design / planning. Implementation not yet started. See:
 
 ## Scope
 
+- **Standalone tool — no dependency on opencode-platform; usable by any OpenCode
+  user.** It reads only stock OpenCode data (`api.json`/`catalog.json`, the
+  `/zen/go/v1/usage` + `auth.json` APIs, `~/.local/share/opencode/opencode.db`,
+  and project `.opencode/opencode.json` files). It does not rely on the
+  platform's `bus.js`, `npm run budget`, or `cost-tracker.js`.
 - Provider of interest: `opencode-go` (base URL `https://opencode.ai/zen/go/v1`).
 - Targets OpenCode v2 (the beta that exposes the `model.request` session hook).
 - Platform-agnostic: lives in `~/.config/opencode/scripts` and as a plugin

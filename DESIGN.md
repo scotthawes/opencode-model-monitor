@@ -8,7 +8,7 @@ reports, it never rewrites a request. Two boxes below
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  price-watch.js  ──►  price history  ──►  alerts (bus)        │
+│  price-watch.js  ──►  price history  ──►  alerts (log / notifier / webhook) │
 │  budget.json     (allowance definition, user-specific)        │
 └──────────────────────────────────────────────────────────────┘
                            │
@@ -17,7 +17,7 @@ reports, it never rewrites a request. Two boxes below
 │  budget-service (MONITORING daemon)                            │
 │   • aggregates spend from opencode.db (read-only)             │
 │   • computes OK/WARNING/CRITICAL/EXHAUSTED per window         │
-│   • publishes STATE to bus  ◄── single source of truth         │
+│   • publishes STATE to its log / notifier / report file  ◄── single source of truth │
 │   • reports / alerts — no reservations, no control             │
 └──────────────────────────────────────────────────────────────┘
         │ (report only — NO check)       │ (report only — NO pick)
@@ -35,7 +35,7 @@ reports, it never rewrites a request. Two boxes below
                            ▼
 ┌──────────────────────────────────────────────────────────────┐
 │ config-audit (REPORT-ONLY) ──► flags pins that cost more       │
-│ npm run budget ──► dashboard (spend vs caps, per-model $/1M)  │
+│ npm run report ──► report (spend vs caps, per-model $/1M)  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -49,7 +49,7 @@ phase *could* attach; they are currently inert.
   the `opencode-go.models.*.cost` subtree (input/output/cache_read/cache_write +
   context-window `tiers`), writes a dated snapshot to
   `~/.config/opencode/price-history/`, diffs vs the previous snapshot, and alerts
-  via `bus.js` on any price change / new / removed model.
+   via log / notifier / webhook on any price change / new / removed model.
 - **`budget.json`** (new, user-specific) — declares the plan and caps per window
   (e.g. `$12/5h`, `$30/week`, `$60/month` for the Go plan — confirm actual
   numbers) plus the free-tier fallback models, plus optional expected caps for
@@ -78,15 +78,16 @@ A long-running **monitoring** service (not a per-request script) that:
 - Computes state per window for **reporting**: `OK → WARNING (>80%) →
   CRITICAL (>95%) → EXHAUSTED (≥100%)`, preferring the API `percent` when
   available and falling back to locally-aggregated spend otherwise.
-- **Publishes state to the bus** so dashboards, logs, and alerts observe one
-  truth (no racing copies).
-- **Reports / alerts** — emits bus events and log lines when thresholds are
+- **Publishes state to its log / notifier / report file** so dashboards, logs, and alerts observe one
+   truth (no racing copies).
+- **Reports / alerts** — emits log lines, desktop notifications, and report-file
+   entries when thresholds are
   crossed. It does *not* expose a hook check or take any action on the
   session.
 
 Rationale for a daemon vs a script: polling the usage API and aggregating
-`opencode.db` on a schedule (cached ~5 min) keeps the dashboard and alerts
-cheap, and avoids repeatedly hitting the API / sqlite from the user's shell.
+   `opencode.db` on a schedule (cached ~5 min) keeps the report and alerts
+   cheap, and avoids repeatedly hitting the API / sqlite from the user's shell.
 The service is purely a cache + publisher.
 
 ## 3. Enforcement — `budget-guard` plugin ( ★ FUTURE / DEFERRED ★ )
@@ -102,7 +103,7 @@ rewrite based on budget state:
 - `CRITICAL` → downgrade the requested model to `hy3`.
 - `EXHAUSTED` → rewrite to a **free-tier** model, switching the *provider
   prefix* to `opencode` (Zen) and verifying usability (GAPS #2).
-- Log every override to the bus for explainability (GAPS #12).
+- Log every override to the log file / report file for explainability (GAPS #12).
 
 This is deferred — for now the service only *reports* that a session is
 CRITICAL/EXHAUSTED; it never changes what model a session uses.
@@ -112,7 +113,7 @@ CRITICAL/EXHAUSTED; it never changes what model a session uses.
 > **Not implemented. Routing/selection is out of scope for the monitoring phase.**
 
 - **Routing policy (`model-select`)** — a future tier→model table (reusing the
-  existing `cost-tracker` tiers: budget / coding / reasoning / premium) keyed
+   existing monitor tier classification (budget / coding / reasoning / premium) keyed
   by budget state. Default cheap (`hy3`); escalate to `qwen3.7-max` /
   `deepseek-v4-pro` / `minimax-m3` only when the task needs it **and** budget
   allows. Would be consulted by the orchestrator before every delegation
@@ -132,7 +133,7 @@ CRITICAL/EXHAUSTED; it never changes what model a session uses.
 
 - **Alerts on model change.** Whenever a model changes — price change, new model
   added, model removed, or a tier/context-window price change — an alert is sent
-  (bus event + log; surfaced on the dashboard). Driven by `price-watch` diffing
+   (log file + notifier/webhook; surfaced on the report command). Driven by `price-watch` diffing
   `api.json`, cross-checked against the GitHub `go.mdx` / `zen.mdx` Atom feeds.
 - **Report all allowances / quotas.** The service surfaces *every* allowance and
   quota dimension it can observe, not just one: Go-plan `rolling` / `weekly` /
@@ -141,16 +142,23 @@ CRITICAL/EXHAUSTED; it never changes what model a session uses.
   USD-per-1M cost and multiplier vs `hy3` (report-only); free-tier model
   availability; and a pricing-catalog snapshot. Nothing is hidden behind a control
   action.
-- `npm run budget` — dashboard: spend vs caps (5h/week/month), per-model USD-per-1M,
-  top-cost agents, recommended actions.
-- `bus.js` alerts on: WARNING / CRITICAL / EXHAUSTED (quota reporting only),
-  model changes, expensive config pins.
+- `npm run report` — bundled report command (reads local state): spend vs caps
+   (5h/week/month), per-model USD-per-1M, top-cost agents, recommended actions.
+   The monitor ships its OWN report command; it does not use the platform's
+   `npm run budget` dashboard.
+- **Alert delivery.** Alerts are written to a **log file** (always on), with
+   optional **stdout**, optional cross-platform **desktop notification** (via
+   `node-notifier`, macOS/Windows/Linux), and/or optional **webhook**
+   (Slack/Discord/custom URL). The monitor also writes a **local report file**
+   (JSON/Markdown) that `npm run report` reads. Channels: WARNING / CRITICAL /
+   EXHAUSTED (quota reporting only), model changes, expensive config pins.
 
 ## Key design decision carried from gap analysis
 
 The original "script + hook" enforcement shape was reframed into a
 **`budget-service` monitoring daemon** as the backbone. The daemon's job is to
-poll the usage API + `opencode.db`, publish state to the bus, and report/alert.
+   poll the usage API + `opencode.db`, publish state to its log / notifier / report
+   file, and report/alert.
 The control pieces that the original design attached to it — in-flight
 reservations (#1), free-tier provider switch (#2), where selection fires (#3),
 override allowlist (#4) — are **deferred** to a future phase, if ever.
