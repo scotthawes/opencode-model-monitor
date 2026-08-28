@@ -6,6 +6,25 @@ const path = require('path');
 // Delivery channels. Configured once at startup with the user's delivery
 // options + the state directory. All functions are best-effort and never throw.
 
+// Set of in-flight delivery promises (webhook fetch / desktop notify).
+// These are fire-and-forget from the caller's perspective, but we track them
+// so flush() can await them all before the process exits — otherwise an
+// async alert() whose promise the caller never awaited would be cut short by
+// process.exit(), dropping webhook/desktop notifications.
+const inFlight = new Set();
+
+function track(p) {
+  inFlight.add(p);
+  p.finally(() => inFlight.delete(p));
+  return p;
+}
+
+// Wait for all in-flight delivery promises to settle. Safe to call multiple
+// times; resolves once nothing is pending.
+async function flush() {
+  await Promise.allSettled([...inFlight]);
+}
+
 let CONFIG = null;
 let STATE_DIR = path.join(__dirname, '..', 'state');
 
@@ -55,28 +74,38 @@ async function alert(level, title, message) {
   }
 
   if (CONFIG.desktop) {
-    try {
-      // Lazy-required so the default run works without node-notifier installed.
-      const notifier = require('node-notifier');
-      notifier.notify({
-        title: `OpenCode Monitor — ${level}`,
-        message: `${title}\n${message}`
-      });
-    } catch (_) {
-      // node-notifier not installed or failed; ignore.
-    }
+    // Tracked in inFlight so flush() awaits it. Wrapped in a promise even
+    // though node-notifier is synchronous, to keep the tracking uniform.
+    track(
+      (async () => {
+        try {
+          // Lazy-required so the default run works without node-notifier installed.
+          const notifier = require('node-notifier');
+          notifier.notify({
+            title: `OpenCode Monitor — ${level}`,
+            message: `${title}\n${message}`
+          });
+        } catch (_) {
+          // node-notifier not installed or failed; ignore.
+        }
+      })()
+    );
   }
 
   if (CONFIG.webhook) {
-    try {
-      await fetch(CONFIG.webhook, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ level, title, message, ts: ts() })
-      });
-    } catch (_) {
-      // best effort
-    }
+    track(
+      (async () => {
+        try {
+          await fetch(CONFIG.webhook, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ level, title, message, ts: ts() })
+          });
+        } catch (_) {
+          // best effort
+        }
+      })()
+    );
   }
 }
 
@@ -179,4 +208,4 @@ function writeReport(report) {
   }
 }
 
-module.exports = { configure, alert, writeReport, renderMarkdown };
+module.exports = { configure, alert, flush, writeReport, renderMarkdown };

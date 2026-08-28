@@ -21,7 +21,7 @@ async function main() {
   let latestModels = {};
 
   async function cycle() {
-    delivery.alert('info', 'Monitor cycle started', new Date().toISOString());
+    await delivery.alert('info', 'Monitor cycle started', new Date().toISOString());
 
     const pricing = await runPriceWatch(stateDir).catch((e) => ({
       status: 'unknown',
@@ -40,7 +40,7 @@ async function main() {
     try {
       pins = runConfigScan(config.scanRoots, latestModels);
     } catch (e) {
-      delivery.alert('warning', 'config-scan failed', String(e && e.message ? e.message : e));
+      await delivery.alert('warning', 'config-scan failed', String(e && e.message ? e.message : e));
     }
 
     const feedUpdates = [];
@@ -53,7 +53,7 @@ async function main() {
       ]);
       for (const r of results) feedUpdates.push(r);
     } catch (e) {
-      delivery.alert('warning', 'atom-watch failed', String(e && e.message ? e.message : e));
+      await delivery.alert('warning', 'atom-watch failed', String(e && e.message ? e.message : e));
     }
 
     const report = {
@@ -64,15 +64,30 @@ async function main() {
       feedUpdates
     };
     delivery.writeReport(report);
-    delivery.alert('info', 'Monitor cycle complete', new Date().toISOString());
+    await delivery.alert('info', 'Monitor cycle complete', new Date().toISOString());
     return report;
+  }
+
+  // Flush any signals before exiting so async delivery (webhook/desktop) that
+  // was kicked off during the cycle is not dropped by a premature process.exit.
+  async function shutdown(code) {
+    try {
+      await delivery.flush();
+    } catch (_) {
+      // best effort
+    }
+    process.exit(code);
   }
 
   await cycle();
 
   if (once) {
-    process.exit(0);
+    await shutdown(0);
   }
+
+  // Continuous mode: flush pending deliveries before exiting on a signal.
+  process.on('SIGINT', () => shutdown(0));
+  process.on('SIGTERM', () => shutdown(0));
 
   // Continuous mode: schedule each feed with its own interval.
   const c = config.cadenceMs;
@@ -121,7 +136,7 @@ async function main() {
     );
   }, c.releases);
 
-  delivery.alert(
+  await delivery.alert(
     'info',
     'Monitor running (continuous)',
     `usage every ${c.usage}ms, pricing every ${c.pricing}ms, config-scan every ${c.db}ms, ` +
