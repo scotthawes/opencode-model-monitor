@@ -53,3 +53,92 @@ Design / planning. Implementation not yet started. See:
 - Targets OpenCode v2 (the beta that exposes the `model.request` session hook).
 - Platform-agnostic: lives in `~/.config/opencode/scripts` and as a plugin
   alongside the existing `caveman` / `ponytail` plugins.
+
+## Usage
+
+A standalone Node.js CLI (CommonJS). It has **no dependency on opencode-platform**
+and works for any OpenCode user. It only reads stock OpenCode data
+(`api.json`, the `/zen/go/v1/usage` API, `auth.json`, and project
+`.opencode/opencode.json` files) and never rewrites or blocks a model request.
+
+### Install
+
+```bash
+git clone <repo> && cd model-budget-guard
+# Optional: desktop notifications (macOS/Windows/Linux)
+npm i node-notifier
+```
+
+The default run path uses only Node.js built-ins (global `fetch`, `fs`, `path`,
+`os`), so it works with **no** `npm install` and no external packages. Desktop
+notifications are lazily required inside a `try/catch`, so they're silently
+skipped unless `node-notifier` is installed **and** `delivery.desktop` is enabled.
+
+### Run
+
+```bash
+npm run monitor:once   # single check, then exit (good first run / cron)
+npm run monitor        # continuous: polls on the configured cadence
+npm run report         # print the latest report from state/report.md
+```
+
+Or directly:
+
+```bash
+node src/monitor.js --once
+node src/monitor.js
+node src/report-cli.js
+```
+
+### Where output goes
+
+All output is written into the `state/` folder inside the repo (configurable via
+`stateDir`):
+
+- `state/alerts.log` — append-only line-per-alert log (always on by default).
+- `state/report.json` — full structured report (always on by default).
+- `state/report.md` — human-readable rendering of the report.
+- `state/pricing-snapshot.json` — last seen pricing catalog (diff source).
+- `state/.etag-pricing` — cached ETag for cheap conditional GETs.
+
+### Config knobs
+
+Create a `config.json` in the repo root to override any default. Merged over
+built-in defaults; missing keys keep their default value.
+
+```jsonc
+{
+  "thresholds": { "warning": 80, "critical": 95 },          // usage % levels
+  "cadenceMs": {
+    "usage": 300000,     // usage/quota poll (5 min)
+    "pricing": 1800000,  // pricing catalog poll (30 min)
+    "atom": 1800000,     // (reserved)
+    "db": 600000,        // config-scan poll (10 min)
+    "releases": 86400000 // (reserved, daily)
+  },
+  "delivery": {
+    "logFile": true,     // write state/alerts.log
+    "reportFile": true,  // write state/report.json + report.md
+    "stdout": false,     // also console.log alerts
+    "desktop": false,    // node-notifier desktop popups (needs install)
+    "webhook": null      // POST JSON alerts to a URL (Slack/Discord/custom)
+  },
+  "scanRoots": ["."],    // absolute or relative paths scanned for .opencode/opencode.json
+  "authJsonPath": "~/.local/share/opencode/auth.json"  // opencode-go key source
+}
+```
+
+What it watches (Phase 1):
+
+1. **Pricing** — polls `https://models.opencode.ai/api.json` with an
+   `If-None-Match` ETag; alerts (`model_change`) on any model added, removed, or
+   whose `cost`/`tiers` changed.
+2. **Usage / quota** — polls `https://opencode.ai/zen/go/v1/usage` with the
+   `opencode-go` bearer key; alerts `warning`/`critical` when a rolling/weekly/
+   monthly window crosses the thresholds.
+3. **Config pins** — scans every `.opencode/opencode.json` under `scanRoots` for
+   agents pinned to `opencode-go/<id>`; flags (`info`) pins whose output cost is
+   more than ~2x `hy3` (report-only — never changes the pin).
+
+> This is the **monitoring-only** phase. It never intervenes in a running
+> session, never downgrades a model, and never enforces a budget.
