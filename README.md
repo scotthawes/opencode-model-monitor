@@ -34,13 +34,32 @@ and surface **alerts/reports** — observation only, no control. The service:
 
 ## Status
 
-Design / planning. Implementation not yet started. See:
+**Implemented (Phases 1–3).** A working, standalone monitoring microservice —
+**no configuration required** to start getting alerts.
 
-- [`DESIGN.md`](DESIGN.md) — system architecture
-- [`PRICING.md`](PRICING.md) — where model pricing comes from
-- [`GAPS.md`](GAPS.md) — gap analysis & design adjustments
-- [`IMPLEMENTATION.md`](IMPLEMENTATION.md) — task breakdown
-- [`FEEDS.md`](FEEDS.md) — data feed sources for every input
+## Quick start (zero config)
+
+Clone and run; alerts start immediately for any OpenCode Go-plan user. No
+`config.json` is needed.
+
+```bash
+git clone https://github.com/scotthawes/opencode-model-monitor
+cd opencode-model-monitor
+npm install            # optional: enables desktop notifications
+npm run monitor       # continuous; writes alerts to state/alerts.log + state/report.md
+```
+
+You'll get alerts (in `state/alerts.log` and `state/report.md`) when:
+
+- a model's price changes, is added, or removed (`api.json` + Go/Zen docs Atom
+  feeds),
+- your Go quota (rolling / weekly / monthly) crosses 80% / 95%
+  (`/zen/go/v1/usage`),
+- a new OpenCode release/model ships (`releases.atom`).
+
+`config.json` is **optional** — see *Config knobs* /
+[`config.example.json`](config.example.json) only if you also want project
+pin-scanning, desktop popups, or a webhook.
 
 ## Scope
 
@@ -50,9 +69,11 @@ Design / planning. Implementation not yet started. See:
   and project `.opencode/opencode.json` files). It does not rely on the
   platform's `bus.js`, `npm run budget`, or `cost-tracker.js`.
 - Provider of interest: `opencode-go` (base URL `https://opencode.ai/zen/go/v1`).
-- Targets OpenCode v2 (the beta that exposes the `model.request` session hook).
-- Platform-agnostic: lives in `~/.config/opencode/scripts` and as a plugin
-  alongside the existing `caveman` / `ponytail` plugins.
+- Targets OpenCode v2 (reads the hosted `opencode-go` model/usage data; no
+  session hooks required).
+- Platform-agnostic: a standalone Node CLI you run yourself (or as a
+  launchd/systemd service). It does not install into `~/.config/opencode` or
+  hook into OpenCode.
 
 ## Usage
 

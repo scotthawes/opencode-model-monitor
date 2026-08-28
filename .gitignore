@@ -6,3 +6,6 @@ node_modules/
 
 # Logs
 *.log
+
+# User config (may contain local paths/secrets — do not commit)
+config.json
