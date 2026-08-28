@@ -64,9 +64,14 @@ Derived from the monitoring-only scope (no control):
      multiplier versus `hy3` (report-only).
    - Free-tier model availability (`opencode` provider `-free` models).
    - A pricing-catalog snapshot (current `api.json`).
-3. **Status thresholds.** At what percent should WARNING / CRITICAL fire
-   (default 80% / 95%)? Used for quota *reporting* only — no action taken.
- 4. **Alert delivery channels.** log file (always), stdout, desktop notification
-    (cross-platform via node-notifier), and/or webhook (Slack/Discord/custom URL)?
-5. **Cadence.** Poll interval per feed (pricing 15-60 min, usage ~5 min, Atom
-   feeds 15-60 min) — tune for cheapness.
+3. **Status thresholds (decided):** WARNING at **80%** and CRITICAL at **95%** of
+   any quota window (rolling / weekly / monthly). Reporting only — no action taken.
+4. **Alert delivery (decided defaults):** enabled by default = **log file**
+   (always on) + **local report file** (`report.json` / `report.md`) consumed by
+   `npm run report`. Opt-in (off by default) = **stdout**, **desktop
+   notification** (node-notifier, cross-platform), and **webhook** (Slack/Discord/
+   custom URL). All configurable in `config.json`.
+5. **Cadence (decided defaults):** usage API **~5 min**; pricing `api.json` /
+   `catalog.json` **30 min**; GitHub Atom feeds **30-60 min**; local `opencode.db`
+   **5-10 min**; `releases.atom` **daily**. Conditional GET (ETag) used where
+   supported to keep polling cheap.
