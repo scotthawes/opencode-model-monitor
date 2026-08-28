@@ -1,4 +1,5 @@
 {
+  "_note": "OPTIONAL. The monitor runs with zero configuration — you do NOT need this file. Copy it to config.json ONLY if you want project pin-scanning, desktop notifications, or webhook delivery. Never commit your real config.json (it may contain local paths/secrets); it is gitignored.",
   "delivery": {
     "desktop": true,
     "webhook": "https://hooks.slack.com/services/XXX/YYY/ZZZ"
