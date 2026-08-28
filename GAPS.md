@@ -4,6 +4,26 @@ Stress-test of the original "script + hook" design. Severity: **[CRIT]**
 would break the core promise, **[MED]** degrades correctness/robustness,
 **[LOW]** hardening.
 
+> ## Scope note — control gaps are DEFERRED
+>
+> This project is now a **monitoring-only** microservice: it observes and reports
+> on OpenCode hosted models but never intercepts, rewrites, downgrades, or blocks
+> any request. As a result, the **control-related gaps are deferred** (not
+> solved, simply out of scope for now):
+>
+> - **#1 in-flight reservations** — no reservations held; nothing to reserve
+>   against. Deferred to a future control phase.
+> - **#2 free-tier provider switch** — no rewriting of model/provider. Deferred.
+> - **#3 where selection fires** — selection is never altered, so there is no
+>   "where it fires" question. Deferred.
+> - **#4 override allowlist** — no downgrade to override, so no allowlist needed.
+>   Deferred.
+>
+> The remaining gaps stay relevant — but as **monitoring-accuracy** concerns,
+> not enforcement: **#5 window semantics**, **#6 context tiers**, **#7 cache
+> pricing**, **#8 multi-DB**, **#9 latency** (polling cost), **#10 dry-run/tests**,
+> **#11 source-down**, **#12 hardcoded tiers**.
+
 ## Critical
 
 **1. In-flight / parallel spend is invisible to the guard [CRIT]**

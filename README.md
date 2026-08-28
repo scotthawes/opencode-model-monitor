@@ -1,24 +1,32 @@
 # model-budget-guard
 
-A **guardrail + smart-selection** system for OpenCode hosted models — the
-`opencode-go` ("Go") provider on `opencode.ai`.
+A **passive monitoring microservice** for OpenCode hosted models — the
+`opencode-go` ("Go") provider on `opencode.ai`. It observes and reports; it
+does **not** intercept, rewrite, downgrade, or block any model request.
 
 ## Goal
 
-1. **Hard guardrail** — never let a model selection exhaust your allowance
-   (caps per 5h / week / month).
-2. **Smart routing** — pick the cheapest model that can do the job, given
-   current budget headroom.
+**Monitor** OpenCode hosted models (pricing, quota/usage, config pins, spend)
+and surface **alerts/reports** — observation only, no control. The service:
+
+1. Polls the documented data feeds (see `FEEDS.md`) for model pricing and price
+   changes, usage/quota via the `/zen/go/v1/usage` API, agent model pins across
+   project `.opencode/opencode.json` files, and local spend from `opencode.db`.
+2. Reports and alerts via the bus, logs, and/or a dashboard.
+3. **Does not** intercept or rewrite model requests, downgrade/block models, or
+   enforce any routing policy on the orchestrator or subagents. All control
+   behavior is deferred to a future phase (if ever).
 
 ## Why this exists
 
 - Project-level `.opencode/opencode.json` files can pin agents to models the
-  operator didn't realize were active. Example found in the wild:
+  operator may not realize are active. Example found in the wild:
   `graphics-programmer → opencode-go/qwen3.7-plus`, which is **~22x the cost**
   of the `hy3` default on output tokens (`$1.60` vs `$0.0725` per 1M).
-- The hosted provider enforces usage caps; blowing them stops all work.
+- The hosted provider enforces usage caps; blowing them halts all work, so it is
+  useful to *see* headroom approaching.
 - Model pricing changes over time and is published by OpenCode — we want to
-  track it and act on it.
+  track it and report on it, so the operator can notice drift.
 
 ## Status
 

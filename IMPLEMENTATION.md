@@ -14,23 +14,28 @@ project GitHub workflow (issue → branch → PR → merge on green; no force-pu
 - [ ] **`budget.json`** schema + loader — plan, caps per window, free-tier
       fallback list. (User supplies actual numbers.)
 
-## Phase 2 — Budget meter / service
-- [ ] **`budget-service` daemon** — aggregate `opencode.db` spend over rolling
-      windows; in-flight reservations; OK/WARNING/CRITICAL/EXHAUSTED state;
-      publish to bus; fast local check endpoint. (Closes #1, #5, #6, #7, #8, #9.)
+## Phase 2 — Budget meter / monitoring service
+- [ ] **`budget-service` daemon (monitoring)** — poll `/zen/go/v1/usage` for
+      quota + aggregate `opencode.db` spend over rolling windows (read-only);
+      OK/WARNING/CRITICAL/EXHAUSTED state; publish state to bus; report/alert.
+      **No in-flight reservations, no local check endpoint, no control.** (Closes
+      #5, #6, #7, #8, #9 for monitoring accuracy.)
 - [ ] Confirm DB topology (single shared vs many) before finalizing.
 
-## Phase 3 — Enforcement
-- [ ] **`budget-guard` plugin** (`model.request` hook) — thin check against the
+## Phase 3 — Enforcement ( ★ FUTURE / DEFERRED ★ )
+> Not built in the monitoring phase. The system does not intervene in sessions.
+- [ ] **`budget-guard` plugin** (`model.request` hook) — would thin-check the
       service; downgrade to `hy3` at CRITICAL; switch to free-tier provider at
-      EXHAUSTED; log overrides to bus. (Closes #2.)
-- [ ] **Override allowlist** — `@premium` / per-task bypass. (Closes #4.)
+      EXHAUSTED; log overrides to bus. **Deferred** (was #2).
+- [ ] **Override allowlist** — `@premium` / per-task bypass. **Deferred** (was #4).
 
-## Phase 4 — Smart selection
+## Phase 4 — Smart selection (model-select DEFERRED) / Config audit (REPORT-ONLY)
 - [ ] **`model-select` policy** — tier×budget→model table derived from live
-      catalog; consulted by orchestrator before every delegation. (Closes #3.)
-- [ ] **Config audit** — scan `.opencode/opencode.json`, flag violating pins,
-      suggest/PR fixes.
+      catalog; consulted by orchestrator before every delegation. **DEFERRED**
+      (was #3) — selection is not altered in the monitoring phase.
+- [ ] **Config audit (REPORT-ONLY)** — scan `.opencode/opencode.json`, flag
+      costly pins, suggest fixes in a report. Does **not** auto-PR or change
+      pins. (Active; the *reporting* half of the original #3.)
 
 ## Phase 5 — Visibility & hardening
 - [ ] **`npm run budget`** dashboard.
@@ -40,8 +45,9 @@ project GitHub workflow (issue → branch → PR → merge on green; no force-pu
       (Closes #12.)
 - [ ] Optional: `zen.mdx` / `go.mdx` git-history watcher for discount notes.
 
-## Open questions (block Phase 1/2)
-1. Actual allowance numbers & windows (confirm Go plan caps or custom).
-2. Free-tier fallback acceptable when exhausted, or hard-stop?
-3. Downgrade strictness at CRITICAL (silent vs alert-then-ask)?
-4. Policy ceiling — cap any agent pin at a $/1M threshold unless justified?
+## Open questions (monitoring thresholds / alerting, not control)
+1. Actual allowance numbers & windows (confirm Go plan caps or custom) — *for
+   setting alert thresholds.*
+2. At what `percent` should WARNING / CRITICAL alerts fire (default 80% / 95%)?
+3. Alert delivery: bus only, logs, dashboard, or all three?
+4. Policy ceiling — report any agent pin above a $/1M threshold (e.g. vs `hy3`)?

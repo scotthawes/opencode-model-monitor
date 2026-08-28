@@ -1,39 +1,47 @@
 # Design
 
-The system has five components. The central insight is that **enforcement must
-happen at model-selection time via a `model.request` hook**, not just via static
-config fixes — otherwise typos, project pins, and subagent spawns slip through.
+The system has five components. The central insight is that **the only thing
+that changes model selection is the operator** — this service observes and
+reports, it never rewrites a request. Two boxes below
+(`budget-guard` plugin and `model-select` policy) are shown only as
+**FUTURE / DEFERRED**: they are not implemented now and may never be.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  price-watch.js  ──►  price history  ──►  alerts (bus)        │
 │  budget.json     (allowance definition, user-specific)        │
 └──────────────────────────────────────────────────────────────┘
-                          │
-                          ▼
+                           │
+                           ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  budget-service (daemon)                                       │
-│   • aggregates spend from opencode.db (+ reservations)         │
+│  budget-service (MONITORING daemon)                            │
+│   • aggregates spend from opencode.db (read-only)             │
 │   • computes OK/WARNING/CRITICAL/EXHAUSTED per window         │
-│   • publishes state to bus  ◄── single source of truth         │
-│   • handles in-flight reservations (concurrency)               │
+│   • publishes STATE to bus  ◄── single source of truth         │
+│   • reports / alerts — no reservations, no control             │
 └──────────────────────────────────────────────────────────────┘
-        │ (thin check)                │ (smart pick at spawn)
-        ▼                             ▼
+        │ (report only — NO check)       │ (report only — NO pick)
+        ▼                                ▼
 ┌──────────────────────┐   ┌──────────────────────────────────┐
 │ budget-guard plugin  │   │ model-select policy               │
-│ (model.request hook) │   │  (tier × budget → model)          │
-│  • downgrade to hy3  │   │  + override allowlist             │
-│  • switch to free    │   │  consulted by orchestrator        │
-│    provider if broke │   │  before every delegation          │
+│ ★ FUTURE / DEFERRED │   │ ★ FUTURE / DEFERRED               │
+│  (model.request hook)│   │  (tier × budget → model)          │
+│  • was: downgrade    │   │  + override allowlist             │
+│    to hy3 / free     │   │  was consulted by orchestrator    │
+│  • NOT active now    │   │  before every delegation          │
+│    — monitoring only │   │  • NOT active now — monitoring     │
 └──────────────────────┘   └──────────────────────────────────┘
-                          │
-                          ▼
+                           │
+                           ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ config-audit  ──► flags pins that violate policy              │
+│ config-audit (REPORT-ONLY) ──► flags pins that cost more       │
 │ npm run budget ──► dashboard (spend vs caps, per-model $/1M)  │
 └──────────────────────────────────────────────────────────────┘
 ```
+
+**Nothing in this system rewrites model selection.** The `budget-guard` plugin
+and `model-select` policy are displayed only to mark where a future control
+phase *could* attach; they are currently inert.
 
 ## 1. Source of truth
 
@@ -49,63 +57,76 @@ config fixes — otherwise typos, project pins, and subagent spawns slip through
   /zen/go/v1/usage API (see FEEDS.md #5), so this file is policy, not the
   source of truth for limits.
 
-## 2. Live budget meter → `budget-service` daemon
+## 2. Monitoring meter → `budget-service` daemon
 
-A long-running service (not a per-request script) that:
+A long-running **monitoring** service (not a per-request script) that:
 
 - **Authoritative quota from the usage API** — polls
   `GET https://opencode.ai/zen/go/v1/usage` (Bearer key from `auth.json`,
   cached ~5 min) for the server-enforced Go quota per window
   (`rolling` / `weekly` / `monthly` `percent` + `resetsAt`). This is
   cross-device and matches what opencode.ai actually enforces — the local DB
-  cannot see other machines' spend (see FEEDS.md #5).
+  cannot see other machines' spend (see FEEDS.md #5). This is read-only
+  observation; the service never acts on the quota.
 - **Supplementary detail from `opencode.db`**
   (`~/.local/share/opencode/opencode.db`, `session` table) for per-model /
   per-agent cost breakdown and history on this machine.
-- Holds **in-flight reservations** so concurrent subagent spawns can't all see
-  "budget OK" before any cost has landed (see GAPS #1).
-- Computes state per window: `OK → WARNING (>80%) → CRITICAL (>95%) →
-  EXHAUSTED (≥100%)`, preferring the API `percent` when available and falling
-  back to locally-aggregated spend otherwise.
-- **Publishes state to the bus** so every session observes one truth (no racing
-  local copies).
-- Exposes a fast local check (socket / file) for the thin hook to call.
+- Reads **only** — it never holds reservations, never approves/denies, never
+  rewrites anything. There are no in-flight reservations (the concurrency
+  blind spot, GAPS #1, is *deferred* to the future control phase rather than
+  solved here).
+- Computes state per window for **reporting**: `OK → WARNING (>80%) →
+  CRITICAL (>95%) → EXHAUSTED (≥100%)`, preferring the API `percent` when
+  available and falling back to locally-aggregated spend otherwise.
+- **Publishes state to the bus** so dashboards, logs, and alerts observe one
+  truth (no racing copies).
+- **Reports / alerts** — emits bus events and log lines when thresholds are
+  crossed. It does *not* expose a hook check or take any action on the
+  session.
 
-Rationale for a daemon vs a script: calling sqlite on every `model.request`
-adds latency to every model call, and a stateless script can't track in-flight
-concurrency (GAPS #9, #1).
+Rationale for a daemon vs a script: polling the usage API and aggregating
+`opencode.db` on a schedule (cached ~5 min) keeps the dashboard and alerts
+cheap, and avoids repeatedly hitting the API / sqlite from the user's shell.
+The service is purely a cache + publisher.
 
-## 3. Enforcement — `budget-guard` plugin (`model.request` hook)
+## 3. Enforcement — `budget-guard` plugin ( ★ FUTURE / DEFERRED ★ )
+
+> **Not implemented. This service is monitoring-only and does not intervene in
+> any running session.** The box is documented only to mark where a future
+> control phase *could* attach.
 
 OpenCode v2 exposes a `model.request` session hook (same surface `caveman` /
-`ponytail` use). The plugin intercepts **every** model request — main session and
-all subagents — and rewrites it based on budget state:
+`ponytail` use). A future enforcement plugin would intercept model requests and
+rewrite based on budget state:
 
 - `CRITICAL` → downgrade the requested model to `hy3`.
-- `EXHAUSTED` → rewrite to a **free-tier** model. Because free models
-  (`hy3-free`, `mimo-v2.5-free`, `deepseek-v4-flash-free`) live on the separate
-  `opencode` (Zen) provider, the rewrite must also switch the *provider prefix*,
-  and the model must be verified usable (GAPS #2).
-- Logs every override to the bus so the user knows *why* a model changed
-  (explainability, GAPS #12).
+- `EXHAUSTED` → rewrite to a **free-tier** model, switching the *provider
+  prefix* to `opencode` (Zen) and verifying usability (GAPS #2).
+- Log every override to the bus for explainability (GAPS #12).
 
-This is what makes "stop us from using models that exhaust the allowance" real
-and automatic.
+This is deferred — for now the service only *reports* that a session is
+CRITICAL/EXHAUSTED; it never changes what model a session uses.
 
-## 4. Smart selection
+## 4. Smart selection ( ★ FUTURE / DEFERRED ★ )
 
-- **Routing policy (`model-select`)** — a tier→model table (reusing the existing
-  `cost-tracker` tiers: budget / coding / reasoning / premium) keyed also by
-  budget state. Default cheap (`hy3`); escalate to `qwen3.7-max` /
+> **Not implemented. Routing/selection is out of scope for the monitoring phase.**
+
+- **Routing policy (`model-select`)** — a future tier→model table (reusing the
+  existing `cost-tracker` tiers: budget / coding / reasoning / premium) keyed
+  by budget state. Default cheap (`hy3`); escalate to `qwen3.7-max` /
   `deepseek-v4-pro` / `minimax-m3` only when the task needs it **and** budget
-  allows. Selection must be **consulted by the orchestrator before every
-  delegation** — the hook is only the backstop (GAPS #3).
-- **Override allowlist** — so the guard doesn't fight deliberate premium use: an
-  explicit `@premium` flag or per-task allowlist bypasses downgrade (GAPS #4).
-- **Config audit** — scans every `.opencode/opencode.json`, lists each agent's
-  pinned model with its $/1M and multiplier vs `hy3`, flags pins that violate
-  policy (e.g. `graphics-programmer → qwen3.7-plus`), and can auto-suggest / PR
-  fixes. This is the *preventive* layer; the hook is the *runtime* layer.
+  allows. Would be consulted by the orchestrator before every delegation
+  (GAPS #3).
+- **Override allowlist** — so a future guard doesn't fight deliberate premium
+  use: an explicit `@premium` flag or per-task allowlist bypasses downgrade
+  (GAPS #4).
+- **Config audit (REPORT-ONLY — active)** — scans every
+  `.opencode/opencode.json`, lists each agent's pinned model with its $/1M
+  and multiplier vs `hy3`, and **flags** pins that are expensive (e.g.
+  `graphics-programmer → qwen3.7-plus`). This is the *reporting* layer only:
+  it surfaces information and suggestions; it does **not** auto-PR fixes or
+  change any pin. (See GAPS.md — control gaps #1–#4 are deferred; #5–#12 still
+  matter for monitoring accuracy.)
 
 ## 5. Visibility & alerts
 
@@ -116,8 +137,15 @@ and automatic.
 
 ## Key design decision carried from gap analysis
 
-The original "script + hook" shape was upgraded to a **`budget-service` daemon**
-as the backbone. This single change closes the concurrency blind spot (#1), the
-free-tier provider switch (#2), window accuracy (#5), context-tier awareness
-(#6), cache pricing (#7), the multi-DB question (#8), and the per-request
-latency problem (#9).
+The original "script + hook" enforcement shape was reframed into a
+**`budget-service` monitoring daemon** as the backbone. The daemon's job is to
+poll the usage API + `opencode.db`, publish state to the bus, and report/alert.
+The control pieces that the original design attached to it — in-flight
+reservations (#1), free-tier provider switch (#2), where selection fires (#3),
+override allowlist (#4) — are **deferred** to a future phase, if ever.
+
+The monitoring daemon still benefits from correct window semantics (#5),
+context-tier awareness (#6), cache pricing (#7), multi-DB handling (#8), and a
+cheap cached poll instead of a per-request query (#9). Components 1 (`price-watch`)
+and 5 (visibility/alerts) are the core active pieces; component 4 (`config-audit`)
+is active but **report-only**.
