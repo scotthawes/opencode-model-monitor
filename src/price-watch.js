@@ -6,6 +6,24 @@ const delivery = require('./delivery');
 
 const API_URL = 'https://models.opencode.ai/api.json';
 
+// Writes a placeholder pricing snapshot on the very first run when pricing
+// could not be fetched (e.g. offline). This guarantees state/pricing-snapshot.json
+// exists so downstream readers never treat a missing file as a fresh, full diff.
+// Only writes if the file does not already exist, so an existing good snapshot is
+// never clobbered by a transient offline blip on a later run.
+function ensureSnapshotExists(snapFile, message) {
+  try {
+    if (!fs.existsSync(snapFile)) {
+      fs.writeFileSync(
+        snapFile,
+        JSON.stringify({ status: 'unknown', error: String(message && message.message ? message.message : message) }, null, 2)
+      );
+    }
+  } catch (_) {
+    // best effort
+  }
+}
+
 // Fetches the authoritative pricing catalog for the opencode-go provider,
 // diffs it against the previous snapshot, and alerts on any model change.
 // Returns { status, models, changes, modelCount, error }.
@@ -26,6 +44,7 @@ async function runPriceWatch(stateDir) {
     res = await fetch(API_URL, { headers });
   } catch (e) {
     delivery.alert('warning', 'Pricing fetch failed', String(e && e.message ? e.message : e));
+    ensureSnapshotExists(snapFile, e && e.message ? e.message : e);
     return { status: 'unknown', error: String(e && e.message ? e.message : e), models: readSnapshot(snapFile) };
   }
 
@@ -35,6 +54,7 @@ async function runPriceWatch(stateDir) {
 
   if (!res.ok) {
     delivery.alert('warning', `Pricing fetch HTTP ${res.status}`, API_URL);
+    ensureSnapshotExists(snapFile, `HTTP ${res.status}`);
     return { status: 'unknown', error: `HTTP ${res.status}`, models: readSnapshot(snapFile) };
   }
 
@@ -44,6 +64,7 @@ async function runPriceWatch(stateDir) {
     data = await res.json();
   } catch (e) {
     delivery.alert('warning', 'Pricing JSON parse failed', String(e && e.message ? e.message : e));
+    ensureSnapshotExists(snapFile, 'parse');
     return { status: 'unknown', error: 'parse', models: readSnapshot(snapFile) };
   }
 
