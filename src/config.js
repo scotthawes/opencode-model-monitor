@@ -5,7 +5,7 @@ const path = require('path');
 const os = require('os');
 
 const DEFAULTS = {
-  thresholds: { warning: 80, critical: 95 },
+  thresholds: { warning: 80, critical: 95, quotaDeltaPct: 5 },
   cadenceMs: {
     usage: 300000,
     pricing: 1800000,

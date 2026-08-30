@@ -138,7 +138,11 @@ function ts() {
 }
 
 // level: info | model_change | warning | critical
-async function alert(level, title, message) {
+// opts.noChangelog (bool) — when true, the alert is delivered (log file /
+// stdout / desktop / webhook) but NOT recorded to the persistent changelog.
+// Used by monitor lifecycle heartbeats so the changelog stays focused on real
+// changes rather than every 5-minute cycle tick.
+async function alert(level, title, message, opts) {
   ensureConfig();
 
   // Dedup cross-source model_change alerts within the TTL window. Other
@@ -166,6 +170,33 @@ async function alert(level, title, message) {
     try {
       const logPath = path.join(STATE_DIR, 'alerts.log');
       fs.appendFileSync(logPath, line + '\n');
+    } catch (_) {
+      // best effort
+    }
+  }
+
+  // Persistent changelog: append to the text log and maintain a capped JSON
+  // array. Only fires for alerts that passed the dedup early-return above, so
+  // suppressed/duplicate model_change alerts are NOT recorded. Best-effort.
+  // Lifecycle heartbeats pass opts.noChangelog to stay out of the changelog.
+  if (!(opts && opts.noChangelog)) {
+    try {
+      fs.appendFileSync(path.join(STATE_DIR, 'changelog.log'), line + '\n');
+    } catch (_) {
+      // best effort
+    }
+    try {
+      let arr = [];
+      try {
+        const raw = fs.readFileSync(path.join(STATE_DIR, 'changelog.json'), 'utf8');
+        arr = JSON.parse(raw);
+        if (!Array.isArray(arr)) arr = [];
+      } catch (_) {
+        arr = [];
+      }
+      arr.push({ ts: ts(), level, title, message });
+      if (arr.length > 500) arr = arr.slice(arr.length - 500);
+      fs.writeFileSync(path.join(STATE_DIR, 'changelog.json'), JSON.stringify(arr, null, 2));
     } catch (_) {
       // best effort
     }
@@ -230,6 +261,10 @@ function renderMarkdown(report) {
     lines.push('Changes detected:');
     for (const c of p.changes) lines.push(`- ${c}`);
   }
+  if (p.modelCount != null) {
+    lines.push('');
+    lines.push(`Models tracked: ${p.modelCount}`);
+  }
   lines.push('');
 
   // Usage
@@ -244,7 +279,8 @@ function renderMarkdown(report) {
       if (!w) continue;
       const pct = w.percent != null ? w.percent + '%' : '?';
       const resets = w.resetsAt ? ` (resets ${w.resetsAt})` : '';
-      lines.push(`- ${win}: ${pct} — ${w.status || '?'}${resets}`);
+      const deltaStr = w.delta != null ? ` (Δ ${w.delta}pts vs prev)` : '';
+      lines.push(`- ${win}: ${pct} — ${w.status || '?'}${resets}${deltaStr}`);
     }
   } else {
     lines.push('No usage data.');
@@ -287,6 +323,27 @@ function renderMarkdown(report) {
         lines.push(`- **${key}**: ${latest.title}${when}`);
       }
     }
+  }
+  lines.push('');
+
+  // Recent changes (persistent changelog)
+  lines.push('## Recent changes');
+  lines.push('');
+  try {
+    const raw = fs.readFileSync(path.join(STATE_DIR, 'changelog.json'), 'utf8');
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr) && arr.length) {
+      const last = arr.slice(-10);
+      for (const e of last) {
+        lines.push(
+          `- [${e.ts}] ${String(e.level || '?').toUpperCase()} | ${e.title || ''} | ${e.message || ''}`
+        );
+      }
+    } else {
+      lines.push('No changes recorded yet.');
+    }
+  } catch (_) {
+    lines.push('No changes recorded yet.');
   }
   lines.push('');
 
