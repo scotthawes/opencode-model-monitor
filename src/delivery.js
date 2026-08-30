@@ -97,13 +97,81 @@ function saveDedup() {
   }
 }
 
+// Seed the changelog from historical alerts.log on first run, so a fresh
+// install starts with recallable history instead of an empty log. Runs at most
+// once per state dir (guarded by a .changelog-backfilled marker); skipped if
+// the changelog already has entries. Only entries within the retention window
+// and at a "real change" level (not lifecycle heartbeats) are carried over.
+function backfillFromAlertsLog(base) {
+  if (!base) return;
+  const marker = path.join(base, '.changelog-backfilled');
+  if (fs.existsSync(marker)) return;
+
+  const clPath = path.join(base, 'changelog.json');
+  let existing = [];
+  try {
+    const p = JSON.parse(fs.readFileSync(clPath, 'utf8'));
+    if (Array.isArray(p)) existing = p;
+  } catch (_) {}
+  if (existing.length) {
+    try { fs.writeFileSync(marker, new Date().toISOString()); } catch (_) {}
+    return;
+  }
+
+  const logPath = path.join(base, 'alerts.log');
+  let lines = [];
+  try {
+    lines = fs.readFileSync(logPath, 'utf8').split('\n');
+  } catch (_) {
+    try { fs.writeFileSync(marker, new Date().toISOString()); } catch (_) {}
+    return;
+  }
+
+  const cutoff = Date.now() - changelogRetentionMs;
+  const seen = new Set();
+  const entries = [];
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const m = line.match(/^\[([^\]]+)\]\s+(\w+)\s+\|\s+(.*?)\s+\|\s+(.*)$/);
+    if (!m) continue;
+    const ts = m[1];
+    const level = m[2].toLowerCase();
+    const title = m[3];
+    const message = m[4];
+    if (!['model_change', 'warning', 'critical', 'info'].includes(level)) continue;
+    if (level === 'info' && (title.startsWith('Monitor cycle') || title === 'Monitor running (continuous)')) continue;
+    const t = Date.parse(ts);
+    if (isNaN(t) || t < cutoff) continue;
+    const key = ts + '|' + title + '|' + message;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    entries.push({ ts, level, title, message });
+  }
+
+  let arr = entries.filter((e) => (e.ts ? Date.parse(e.ts) : 0) >= cutoff);
+  if (arr.length > 500) arr = arr.slice(arr.length - 500);
+  try {
+    if (arr.length) {
+      fs.writeFileSync(clPath, JSON.stringify(arr, null, 2));
+      const logBlob =
+        arr.map((e) => `[${e.ts}] ${e.level.toUpperCase()} | ${e.title} | ${e.message}`).join('\n') + '\n';
+      fs.appendFileSync(path.join(base, 'changelog.log'), logBlob);
+    }
+  } catch (_) {}
+  try { fs.writeFileSync(marker, new Date().toISOString()); } catch (_) {}
+}
+
 // Initialize the persistent dedup store. Called by monitor at the start of
 // each cycle (or once before a single run) with the state directory and opts.
 function init(stateDir, opts) {
-  if (stateDir) DEDUP_DIR = stateDir;
+  if (stateDir) {
+    DEDUP_DIR = stateDir;
+    STATE_DIR = stateDir;
+  }
   if (opts && typeof opts.dedupTtlMs === 'number') dedupTtlMs = opts.dedupTtlMs;
   if (opts && typeof opts.changelogRetentionMs === 'number') changelogRetentionMs = opts.changelogRetentionMs;
   loadDedup();
+  backfillFromAlertsLog(stateDir || STATE_DIR);
 }
 
 // Wait for all in-flight delivery promises to settle. Safe to call multiple
