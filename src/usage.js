@@ -1,13 +1,32 @@
 'use strict';
 
 const fs = require('fs');
+const path = require('path');
 const delivery = require('./delivery');
 
 const USAGE_URL = 'https://opencode.ai/zen/go/v1/usage';
 
 // Reads the opencode-go API key from auth.json (defensively), then polls the
 // server-enforced usage/quota endpoint. Returns { status, usage, error }.
-async function runUsage(authJsonPath, thresholds) {
+// stateDir: directory where per-window quota history is persisted so we can
+// compute deltas between cycles.
+async function runUsage(authJsonPath, thresholds, stateDir) {
+  // Per-window percentage history (window -> percent), best-effort.
+  const historyFile = stateDir ? path.join(stateDir, 'usage-history.json') : null;
+  const prevPct = {};
+  if (historyFile) {
+    try {
+      const raw = fs.readFileSync(historyFile, 'utf8');
+      const obj = JSON.parse(raw) || {};
+      for (const win of ['rolling', 'weekly', 'monthly']) {
+        if (typeof obj[win] === 'number') prevPct[win] = obj[win];
+      }
+    } catch (_) {
+      // Missing/corrupt history is fine — treat as first run.
+    }
+  }
+  const deltaThreshold =
+    thresholds && typeof thresholds.quotaDeltaPct === 'number' ? thresholds.quotaDeltaPct : 5;
   let key = null;
   try {
     const raw = fs.readFileSync(authJsonPath, 'utf8');
@@ -59,16 +78,44 @@ async function runUsage(authJsonPath, thresholds) {
   const warn = thresholds && typeof thresholds.warning === 'number' ? thresholds.warning : 80;
   const crit = thresholds && typeof thresholds.critical === 'number' ? thresholds.critical : 95;
 
+  const currentPct = {};
   for (const win of ['rolling', 'weekly', 'monthly']) {
     const w = usage[win];
     if (!w) continue;
     const pct = typeof w.percent === 'number' ? w.percent : null;
     if (pct == null) continue;
+    currentPct[win] = pct;
+
+    // Delta vs previous cycle (null on the first run / no history).
+    const prev = prevPct[win] != null ? prevPct[win] : null;
+    const delta = prev == null ? null : pct - prev;
+    w.delta = delta;
+
+    // Quota-delta alert: only when we have a real prior value and the move is
+    // significant. Suppressed on the first run so we just record a baseline.
+    if (prev != null && Math.abs(delta) >= deltaThreshold) {
+      delivery.alert(
+        'info',
+        'Quota ' + win + ' changed',
+        pct + '% used (was ' + prev + '%, ' + (delta > 0 ? '+' : '') + delta +
+          'pts) (resets ' + (w.resetsAt || '?') + ')'
+      );
+    }
+
     const detail = `${pct}% used (resets ${w.resetsAt || '?'})`;
     if (pct >= crit) {
       delivery.alert('critical', `Quota ${win} critical`, detail);
     } else if (pct >= warn) {
       delivery.alert('warning', `Quota ${win} warning`, detail);
+    }
+  }
+
+  // Persist current percentages for next cycle's delta comparison.
+  if (historyFile) {
+    try {
+      fs.writeFileSync(historyFile, JSON.stringify(currentPct));
+    } catch (_) {
+      // best effort
     }
   }
 

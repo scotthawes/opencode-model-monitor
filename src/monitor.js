@@ -22,7 +22,7 @@ async function main() {
 
   async function cycle() {
     delivery.init(stateDir, { dedupTtlMs: 86400000 });
-    await delivery.alert('info', 'Monitor cycle started', new Date().toISOString());
+    await delivery.alert('info', 'Monitor cycle started', new Date().toISOString(), { noChangelog: true });
 
     const pricing = await runPriceWatch(stateDir).catch((e) => ({
       status: 'unknown',
@@ -33,7 +33,7 @@ async function main() {
     latestModels = modelsMap;
     delivery.setKnownModelIds(new Set(Object.keys(modelsMap)));
 
-    const usage = await runUsage(config.authJsonPath, config.thresholds).catch((e) => ({
+    const usage = await runUsage(config.authJsonPath, config.thresholds, stateDir).catch((e) => ({
       status: 'unknown',
       error: String(e && e.message ? e.message : e)
     }));
@@ -66,7 +66,7 @@ async function main() {
       feedUpdates
     };
     delivery.writeReport(report);
-    await delivery.alert('info', 'Monitor cycle complete', new Date().toISOString());
+    await delivery.alert('info', 'Monitor cycle complete', new Date().toISOString(), { noChangelog: true });
     return report;
   }
 
@@ -105,7 +105,7 @@ async function main() {
   }, c.pricing);
 
   setInterval(() => {
-    runUsage(config.authJsonPath, config.thresholds).catch((e) =>
+    runUsage(config.authJsonPath, config.thresholds, stateDir).catch((e) =>
       delivery.alert('warning', 'usage failed', String(e && e.message ? e.message : e))
     );
   }, c.usage);
@@ -142,7 +142,8 @@ async function main() {
     'info',
     'Monitor running (continuous)',
     `usage every ${c.usage}ms, pricing every ${c.pricing}ms, config-scan every ${c.db}ms, ` +
-      `atom feeds every ${c.atom}ms, releases every ${c.releases}ms`
+      `atom feeds every ${c.atom}ms, releases every ${c.releases}ms`,
+    { noChangelog: true }
   );
 }
 
