@@ -37,6 +37,10 @@ let dedupStore = new Map();
 // Default TTL for suppressing duplicate model_change alerts (24h).
 let dedupTtlMs = 86400000;
 
+// Default retention window for the persistent changelog (7 days). Entries older
+// than this are pruned so the report only shows recent, recallable changes.
+let changelogRetentionMs = 7 * 24 * 60 * 60 * 1000;
+
 // Directory the dedup store is persisted to (defaults to STATE_DIR at call time).
 let DEDUP_DIR = null;
 
@@ -98,6 +102,7 @@ function saveDedup() {
 function init(stateDir, opts) {
   if (stateDir) DEDUP_DIR = stateDir;
   if (opts && typeof opts.dedupTtlMs === 'number') dedupTtlMs = opts.dedupTtlMs;
+  if (opts && typeof opts.changelogRetentionMs === 'number') changelogRetentionMs = opts.changelogRetentionMs;
   loadDedup();
 }
 
@@ -195,6 +200,8 @@ async function alert(level, title, message, opts) {
         arr = [];
       }
       arr.push({ ts: ts(), level, title, message });
+      const cutoff = Date.now() - changelogRetentionMs;
+      arr = arr.filter((e) => (e.ts ? Date.parse(e.ts) : 0) >= cutoff);
       if (arr.length > 500) arr = arr.slice(arr.length - 500);
       fs.writeFileSync(path.join(STATE_DIR, 'changelog.json'), JSON.stringify(arr, null, 2));
     } catch (_) {
@@ -326,15 +333,20 @@ function renderMarkdown(report) {
   }
   lines.push('');
 
-  // Recent changes (persistent changelog)
+  // Recent changes (persistent changelog) — newest first, within retention window
   lines.push('## Recent changes');
   lines.push('');
   try {
     const raw = fs.readFileSync(path.join(STATE_DIR, 'changelog.json'), 'utf8');
     const arr = JSON.parse(raw);
-    if (Array.isArray(arr) && arr.length) {
-      const last = arr.slice(-10);
-      for (const e of last) {
+    const cutoff = Date.now() - changelogRetentionMs;
+    const within = Array.isArray(arr)
+      ? arr.filter((e) => (e.ts ? Date.parse(e.ts) : 0) >= cutoff)
+      : [];
+    if (within.length) {
+      // Show most-recent first (stored oldest→newest, so reverse the last N).
+      const recent = within.slice(-20).reverse();
+      for (const e of recent) {
         lines.push(
           `- [${e.ts}] ${String(e.level || '?').toUpperCase()} | ${e.title || ''} | ${e.message || ''}`
         );
