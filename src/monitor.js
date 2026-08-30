@@ -21,7 +21,10 @@ async function main() {
   let latestModels = {};
 
   async function cycle() {
-    delivery.init(stateDir, { dedupTtlMs: 86400000 });
+    delivery.init(stateDir, {
+      dedupTtlMs: 86400000,
+      changelogRetentionMs: (config.changelogRetentionDays || 7) * 24 * 60 * 60 * 1000
+    });
     await delivery.alert('info', 'Monitor cycle started', new Date().toISOString(), { noChangelog: true });
 
     const pricing = await runPriceWatch(stateDir).catch((e) => ({
