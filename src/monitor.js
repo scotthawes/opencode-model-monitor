@@ -8,6 +8,10 @@ const { runPriceWatch } = require('./price-watch');
 const { runUsage } = require('./usage');
 const { runConfigScan } = require('./config-scan');
 const { runAtomWatch } = require('./atom-watch');
+const discordDigest = require('./discord-digest');
+
+// Post the periodic Discord digest on this cadence while running continuously.
+const DIGEST_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 async function main() {
   const config = loadConfig();
@@ -16,6 +20,7 @@ async function main() {
   delivery.configure(config.delivery, stateDir);
 
   const once = process.argv.includes('--once') || process.argv.includes('-1');
+  const digestOnce = process.argv.includes('--digest-once');
 
   // Latest models map, refreshed by price-watch, used by config-scan.
   let latestModels = {};
@@ -86,6 +91,20 @@ async function main() {
 
   await cycle();
 
+  // Manual one-shot digest: post the current 7-day summary and exit. This is
+  // the command used to push a live baseline into Discord on demand. It does
+  // NOT run on the plain `--once` path (which is purely a monitor check).
+  if (digestOnce) {
+    const chunks = await discordDigest.postDigest({ stateDir });
+    await delivery.alert(
+      'info',
+      'Discord digest posted',
+      `${chunks.length} chunk(s) sent to digest subscribers`,
+      { noChangelog: true }
+    );
+    await shutdown(0);
+  }
+
   if (once) {
     await shutdown(0);
   }
@@ -140,6 +159,16 @@ async function main() {
       delivery.alert('warning', 'atom-watch failed: releases', String(e && e.message ? e.message : e))
     );
   }, c.releases);
+
+  // Periodic Discord digest: post the human-readable 7-day summary once a day
+  // so the Discord channel becomes the alert + report hub (not just alerts).
+  setInterval(() => {
+    discordDigest
+      .postDigest({ stateDir })
+      .catch((e) =>
+        delivery.alert('warning', 'discord digest failed', String(e && e.message ? e.message : e))
+      );
+  }, DIGEST_INTERVAL_MS);
 
   await delivery.alert(
     'info',

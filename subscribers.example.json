@@ -7,7 +7,12 @@
   {
     "name": "team-discord",
     "webhookEnv": "MODEL_MONITOR_DISCORD_WEBHOOK",
-    "levels": ["model_change", "warning", "critical"]
+    "levels": ["model_change", "warning", "critical", "digest"]
+  },
+  {
+    "name": "my-discord",
+    "webhookUrl": "https://discord.com/api/webhooks/000000000000000000/XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+    "levels": ["model_change", "warning", "critical", "digest"]
   }
   // Discord FORUM channel example — Discord needs { content: "..." } (sent
   // automatically when the URL contains discord.com/api/webhooks) AND, for a
@@ -34,4 +39,11 @@
   //
   // (Never commit a real webhook URL — subscribers.json is gitignored. The
   //  placeholder above is not a valid webhook and is only illustrative.)
+  //
+  // DIGEST level — add "digest" to a subscriber's `levels` to also receive the
+  // periodic human-readable summary (7-day changes, upcoming resets/projections,
+  // models tracked). The monitor posts it every 24h in continuous mode and on
+  // demand via `node src/monitor.js --digest-once`. Discord digests are chunked
+  // into <=2000-char posts, same as alerts. A subscriber with "info" in its
+  // levels also receives digests.
 ]
