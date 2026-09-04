@@ -1,6 +1,6 @@
 {
   "name": "opencode-model-monitor",
-  "version": "0.4.0",
+  "version": "0.4.2",
   "description": "Passive monitoring microservice for OpenCode hosted (opencode-go) models: pricing changes, usage/quota, and agent config pins. Observation only — never intervenes in a session.",
   "type": "commonjs",
   "main": "src/monitor.js",

@@ -17,4 +17,10 @@ COPY . .
 # State + subscriber secret live on the host volume, not in the image.
 VOLUME ["/app/state"]
 
+# Lightweight liveness probe: the monitor is a long-running Node process. This
+# only confirms the container/runtime is healthy (Node can execute); it does not
+# assert monitor state. Keep it trivial so it never breaks the build.
+HEALTHCHECK --interval=5m --timeout=10s --start-period=10s --retries=3 \
+  CMD node -e "process.exit(0)"
+
 CMD ["node", "src/monitor.js"]
