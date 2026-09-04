@@ -9,4 +9,29 @@
     "webhookEnv": "MODEL_MONITOR_DISCORD_WEBHOOK",
     "levels": ["model_change", "warning", "critical"]
   }
+  // Discord FORUM channel example — Discord needs { content: "..." } (sent
+  // automatically when the URL contains discord.com/api/webhooks) AND, for a
+  // forum channel, a thread target. Append ?thread_name=... to create a new
+  // post, or ?thread_id=... to reply to an existing one. The query string is
+  // passed through verbatim, so just put it on the webhook URL:
+  //
+  //   {
+  //     "name": "team-discord-forum",
+  //     "webhookUrl": "https://discord.com/api/webhooks/000000000000000000/XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX?thread_name=Budget+alerts",
+  //     "levels": ["model_change", "warning", "critical"]
+  //   }
+  //
+  // Alternatively, keep the secret out of the file and supply the forum query
+  // via the env var MODEL_MONITOR_DISCORD_FORUM_WEBHOOK. You can also omit the
+  // query string from the URL and set it per-subscriber instead:
+  //
+  //   {
+  //     "name": "team-discord-forum",
+  //     "webhookEnv": "MODEL_MONITOR_DISCORD_FORUM_WEBHOOK",
+  //     "threadName": "Budget alerts",
+  //     "levels": ["model_change", "warning", "critical"]
+  //   }
+  //
+  // (Never commit a real webhook URL — subscribers.json is gitignored. The
+  //  placeholder above is not a valid webhook and is only illustrative.)
 ]

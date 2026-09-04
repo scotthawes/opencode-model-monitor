@@ -198,6 +198,51 @@ function init(stateDir, opts) {
 // the tracked delivery promise indefinitely.
 const SUBSCRIBER_TIMEOUT_MS = 10000;
 
+// Discord's incoming-webhook API uses { content: "..." } (max 2000 chars), not
+// the Slack-shaped { text: "..." }. Slack/custom endpoints keep { text }.
+const DISCORD_WEBHOOK_RE = /discord\.com\/api\/webhooks/i;
+const DISCORD_CONTENT_MAX = 2000;
+const DISCORD_USERNAME = 'model-monitor';
+
+// Append `key=value` to a URL, choosing ? or & based on existing query string.
+function appendQuery(url, key, value) {
+  const sep = url.includes('?') ? '&' : '?';
+  return url + sep + key + '=' + encodeURIComponent(value);
+}
+
+// Build the per-subscriber delivery payload + final URL.
+// - Discord (url matches discord.com/api/webhooks): send { content: "[LEVEL]
+//   title — message" } truncated to 2000 chars + a username; Slack/custom keep
+//   { text: "..." } so existing subscribers are unaffected.
+// - Discord FORUM channels need ?thread_name= (new post) or ?thread_id= (reply)
+//   on the webhook URL. The URL is used verbatim, so any query string the user
+//   already included is preserved untouched. Subscriber fields `threadName` /
+//   `threadId` optionally append the matching param when not already present.
+// Returns { url, payload }. `url` is always a string (a valid http(s) URL or
+// the raw value the caller passed); this function never throws.
+function buildSubscriberDelivery(sub, url, level, title, message) {
+  const text = `[${String(level).toUpperCase()}] ${title} — ${message}`;
+  const isDiscord = DISCORD_WEBHOOK_RE.test(url || '');
+  let payload;
+  if (isDiscord) {
+    payload = {
+      content: text.length > DISCORD_CONTENT_MAX ? text.slice(0, DISCORD_CONTENT_MAX) : text,
+      username: DISCORD_USERNAME
+    };
+  } else {
+    payload = { text };
+  }
+  if (isDiscord && sub) {
+    const hasThreadName = /[?&]thread_name=/i.test(url);
+    const hasThreadId = /[?&]thread_id=/i.test(url);
+    if (!hasThreadName && !hasThreadId) {
+      if (sub.threadId) url = appendQuery(url, 'thread_id', sub.threadId);
+      else if (sub.threadName) url = appendQuery(url, 'thread_name', sub.threadName);
+    }
+  }
+  return { url, payload };
+}
+
 let SUBSCRIBERS = [];
 
 function subscribersPath() {
@@ -394,19 +439,22 @@ async function alert(level, title, message, opts) {
   }
 
   // Persistent subscriber fan-out. For every subscriber whose `levels` filter
-  // includes this alert's level, POST { text: "[LEVEL] title — message" } to
-  // its webhook URL (resolved directly, or via a webhookEnv env var so the
-  // secret never lives in subscribers.json). Fully best-effort: timeouts and
-  // other failures are logged as WARNING and never thrown, and a malformed
-  // entry is skipped so one bad subscriber can't break alert delivery.
+  // includes this alert's level, POST an alert to its webhook URL (resolved
+  // directly, or via a webhookEnv env var so the secret never lives in
+  // subscribers.json). Discord webhooks receive { content: "..." } (truncated to
+  // 2000 chars); Slack/custom endpoints receive the original { text: "..." }.
+  // Forum-channel thread params (?thread_name=/?thread_id=) pass through
+  // verbatim. Fully best-effort: timeouts and other failures are logged as
+  // WARNING and never thrown, and a malformed entry is skipped so one bad
+  // subscriber can't break alert delivery.
   for (const sub of SUBSCRIBERS) {
     try {
       if (!sub || !Array.isArray(sub.levels) || !sub.levels.includes(level)) continue;
       let url = sub.webhookUrl;
       if (!url && sub.webhookEnv) url = process.env[sub.webhookEnv];
       if (!url) continue; // nothing resolvable to deliver to
-      const payload = { text: `[${String(level).toUpperCase()}] ${title} — ${message}` };
-      track(deliverToSubscriber(sub, url, payload));
+      const { url: finalUrl, payload } = buildSubscriberDelivery(sub, url, level, title, message);
+      track(deliverToSubscriber(sub, finalUrl, payload));
     } catch (_) {
       // A structurally broken entry must not crash the alert path.
     }
@@ -674,5 +722,6 @@ module.exports = {
   init,
   setKnownModelIds,
   loadSubscribers,
-  deliverToSubscriber
+  deliverToSubscriber,
+  buildSubscriberDelivery
 };
