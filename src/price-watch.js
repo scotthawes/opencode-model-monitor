@@ -84,23 +84,31 @@ async function runPriceWatch(stateDir) {
   const prevIds = new Set(Object.keys(prev));
   const newIds = new Set(Object.keys(modelsMap));
   const changes = [];
+  // Structured descriptors for the aggregated Discord model-change table.
+  const modelChanges = [];
 
   for (const id of newIds) {
     if (!prevIds.has(id)) {
       changes.push(`Added model: ${id}`);
+      modelChanges.push({ subtype: 'added', model: id, cost: (modelsMap[id] || {}).cost || null });
     } else {
       const a = prev[id] || {};
       const b = modelsMap[id] || {};
       if (JSON.stringify(a.cost) !== JSON.stringify(b.cost)) {
         changes.push(`Cost changed for ${id}: ${JSON.stringify(a.cost)} -> ${JSON.stringify(b.cost)}`);
+        modelChanges.push({ subtype: 'cost', model: id, oldCost: a.cost || null, newCost: b.cost || null });
       }
       if (JSON.stringify(a.tiers) !== JSON.stringify(b.tiers)) {
         changes.push(`Tiers changed for ${id}`);
+        modelChanges.push({ subtype: 'tiers', model: id });
       }
     }
   }
   for (const id of prevIds) {
-    if (!newIds.has(id)) changes.push(`Removed model: ${id}`);
+    if (!newIds.has(id)) {
+      changes.push(`Removed model: ${id}`);
+      modelChanges.push({ subtype: 'removed', model: id });
+    }
   }
 
   try {
@@ -110,8 +118,10 @@ async function runPriceWatch(stateDir) {
     delivery.alert('warning', 'Pricing snapshot save failed', String(e && e.message ? e.message : e));
   }
 
-  if (changes.length) {
-    for (const c of changes) delivery.alert('model_change', 'Model changed', c);
+  // alerts.log still gets the human-readable single lines, while Discord gets a
+  // single aggregated table post (old->new per metric) instead of N one-liners.
+  if (modelChanges.length) {
+    delivery.deliverModelChangeTable(modelChanges);
   }
 
   return {
