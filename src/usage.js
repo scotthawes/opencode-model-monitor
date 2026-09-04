@@ -11,18 +11,44 @@ const USAGE_URL = 'https://opencode.ai/zen/go/v1/usage';
 // stateDir: directory where per-window quota history is persisted so we can
 // compute deltas between cycles.
 async function runUsage(authJsonPath, thresholds, stateDir) {
-  // Per-window percentage history (window -> percent), best-effort.
+  // Time-series quota history: an array of samples [{ts, rolling, weekly,
+  // monthly}]. Kept for ~8 days so a 7-day movement window is always available.
   const historyFile = stateDir ? path.join(stateDir, 'usage-history.json') : null;
-  const prevPct = {};
+  const PRUNE_MS = 8 * 24 * 3600 * 1000;
+  const MAX_SAMPLES = 5000;
+
+  // Load best-effort. Supports the new array format, gracefully migrates the
+  // old latest-only object format {rolling,weekly,monthly}, and tolerates a
+  // missing/corrupt file by starting empty.
+  let history = [];
   if (historyFile) {
     try {
       const raw = fs.readFileSync(historyFile, 'utf8');
-      const obj = JSON.parse(raw) || {};
-      for (const win of ['rolling', 'weekly', 'monthly']) {
-        if (typeof obj[win] === 'number') prevPct[win] = obj[win];
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        history = parsed;
+      } else if (parsed && typeof parsed === 'object') {
+        history = [
+          {
+            ts: Date.now(),
+            rolling: typeof parsed.rolling === 'number' ? parsed.rolling : null,
+            weekly: typeof parsed.weekly === 'number' ? parsed.weekly : null,
+            monthly: typeof parsed.monthly === 'number' ? parsed.monthly : null
+          }
+        ];
       }
     } catch (_) {
-      // Missing/corrupt history is fine — treat as first run.
+      history = [];
+    }
+  }
+
+  // Per-cycle delta is computed against the previous sample in the series (the
+  // last element before we append the new one this cycle).
+  const prevSample = history.length ? history[history.length - 1] : null;
+  const prevPct = {};
+  if (prevSample) {
+    for (const win of ['rolling', 'weekly', 'monthly']) {
+      if (typeof prevSample[win] === 'number') prevPct[win] = prevSample[win];
     }
   }
   const deltaThreshold =
@@ -110,10 +136,21 @@ async function runUsage(authJsonPath, thresholds, stateDir) {
     }
   }
 
-  // Persist current percentages for next cycle's delta comparison.
+  // Persist the time-series: append this cycle's sample, prune anything older
+  // than ~8 days, and cap the array length as a safety.
   if (historyFile) {
     try {
-      fs.writeFileSync(historyFile, JSON.stringify(currentPct));
+      const now = Date.now();
+      const sample = { ts: now };
+      for (const win of ['rolling', 'weekly', 'monthly']) {
+        const w = usage && usage[win];
+        sample[win] = w && typeof w.percent === 'number' ? w.percent : null;
+      }
+      history.push(sample);
+      const cutoff = now - PRUNE_MS;
+      history = history.filter((s) => s.ts >= cutoff);
+      if (history.length > MAX_SAMPLES) history = history.slice(history.length - MAX_SAMPLES);
+      fs.writeFileSync(historyFile, JSON.stringify(history));
     } catch (_) {
       // best effort
     }
