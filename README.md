@@ -217,17 +217,31 @@ next to `config.json`:
   delivered to a subscriber only if its level is in this list (so `info`
   heartbeat cycles are excluded unless you opt in).
 
-On each alert the monitor `POST`s
-`{ "text": "[MODEL_CHANGE] title — message" }` (level uppercased) to every
-matching subscriber. Delivery is fully best-effort: a ~10s per-subscriber
-timeout, failures are logged to `state/alerts.log` as `WARNING | Subscriber
-delivery failed (name)`, and a bad subscriber never throws or stops the
-monitor. The legacy `MODEL_MONITOR_WEBHOOK` single-path still works exactly as
-before when no `subscribers.json` is present.
+On each alert the monitor `POST`s a JSON body to every matching subscriber.
+**Slack / custom** endpoints receive the Slack-shaped
+`{ "text": "[MODEL_CHANGE] title — message" }` (level uppercased). **Discord**
+endpoints (detected by a `discord.com/api/webhooks` URL) instead receive
+`{ "content": "[MODEL_CHANGE] title — message", "username": "model-monitor" }`
+— Discord requires `content`, not `text`, and silently 400s (`Cannot send an
+empty message`) otherwise. `content` is truncated to Discord's 2000-char limit.
+
+Delivery is fully best-effort: a ~10s per-subscriber timeout, failures are
+logged to `state/alerts.log` as `WARNING | Subscriber delivery failed (name)`,
+and a bad subscriber never throws or stops the monitor. The legacy
+`MODEL_MONITOR_WEBHOOK` single-path still works exactly as before when no
+`subscribers.json` is present.
+
+**Discord FORUM channels:** a forum webhook needs a thread target. Append
+`?thread_name=<name>` (create a new post) or `?thread_id=<id>` (reply to an
+existing post) to the webhook URL — the query string is passed through
+verbatim, so just put it on the URL. You can also leave it off the URL and set
+it per-subscriber with `"threadName": "Budget alerts"` / `"threadId": "1234"`
+(which appends `?thread_name=`/`?thread_id=` automatically). See the commented
+forum example in `subscribers.example.json`.
 
 **Add a subscriber (Slack or Discord):**
 1. Copy `subscribers.example.json` → `subscribers.json`.
-2. Add `{ "name": "...", "webhookUrl": "<Slack/Discord incoming-webhook URL>", "levels": ["model_change","warning","critical"] }` (or use `webhookEnv` to read the URL from an env var).
+2. Add `{ "name": "...", "webhookUrl": "<Slack/Discord incoming-webhook URL>", "levels": ["model_change","warning","critical"] }` (or use `webhookEnv` to read the URL from an env var). For a Discord forum channel, include `?thread_name=`/`?thread_id=` on the URL (or use the `threadName`/`threadId` fields).
 3. Test instantly with a one-shot run: `MODEL_MONITOR_WEBHOOK= URL node src/monitor.js --once` — or just watch `state/alerts.log` for your subscriber name on the next alert.
 
 A ready-to-edit template lives at [`config.example.json`](config.example.json).
