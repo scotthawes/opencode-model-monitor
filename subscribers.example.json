@@ -1,0 +1,12 @@
+[
+  {
+    "name": "team-slack",
+    "webhookUrl": "https://hooks.slack.com/services/XXX/YYY/ZZZ",
+    "levels": ["model_change", "warning", "critical"]
+  },
+  {
+    "name": "team-discord",
+    "webhookEnv": "MODEL_MONITOR_DISCORD_WEBHOOK",
+    "levels": ["model_change", "warning", "critical"]
+  }
+]

@@ -1,5 +1,6 @@
 {
   "_note": "OPTIONAL. The monitor runs with zero configuration — you do NOT need this file. Copy it to config.json ONLY if you want project pin-scanning, desktop notifications, or webhook delivery. Never commit your real config.json (it may contain local paths/secrets); it is gitignored.",
+  "_subscribers_note": "For MULTIPLE alert destinations with per-destination level filtering, create a gitignored subscribers.json (copy subscribers.example.json) — see README 'Subscribers' section. It is separate from config.json and supports env-var indirection so webhook secrets stay out of the file.",
   "delivery": {
     "desktop": true,
     "webhook": "https://hooks.slack.com/services/XXX/YYY/ZZZ"
