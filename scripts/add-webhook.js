@@ -272,6 +272,52 @@ async function main() {
   rl.close();
 }
 
+// --- usage / help -----------------------------------------------------------
+//
+// Print usage and exit 0 when --help / -h is the first argument. This must run
+// BEFORE main() so we never prompt or write when the user only asked for help.
+
+function printUsage() {
+  console.log(`opencode-model-monitor webhook onboarding
+
+Add your own ping channel to the gitignored subscribers.json (mode 0600).
+No secrets are committed: a webhook URL may also be supplied via an env var.
+
+USAGE
+  npm run add-webhook [--help | -h]
+  node scripts/add-webhook.js [--help | -h]
+
+URL vs ENV
+  When prompted for the webhook, either:
+    - paste a full https URL (https:// only; Discord, Slack, or generic https)
+    - type 'env' and name an environment variable holding the URL, e.g.
+      MODEL_MONITOR_DISCORD_WEBHOOK (the secret stays in your environment /
+      service unit, never in the repo)
+
+ALERT LEVELS (comma-separated)
+  ${ALLOWED_LEVELS.join(', ')}
+  Default: ${DEFAULT_LEVELS.join(', ')}
+
+EXAMPLES
+  # Interactive: paste a Discord webhook URL, confirm the live test post
+  npm run add-webhook
+
+  # Non-interactive: URL via env var (no test POST until the var is exported)
+  export MODEL_MONITOR_DISCORD_WEBHOOK="https://discord.com/api/webhooks/..."
+  npm run add-webhook
+
+  # Show this help
+  npm run add-webhook --help
+`);
+}
+
+const _firstArg = process.argv.slice(2)[0];
+if (_firstArg === '--help' || _firstArg === '-h') {
+  printUsage();
+  rl.close();
+  process.exit(0);
+}
+
 main().catch((e) => {
   console.error('Onboarding failed:', e && e.stack ? e.stack : e);
   rl.close();

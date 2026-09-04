@@ -71,8 +71,11 @@ pin-scanning, desktop popups, or a webhook.
 - **Standalone tool — no dependency on opencode-platform; usable by any OpenCode
   user.** It reads only stock OpenCode data (`api.json`/`catalog.json`, the
   `/zen/go/v1/usage` + `auth.json` APIs, `~/.local/share/opencode/opencode.db`,
-  and project `.opencode/opencode.json` files). It does not rely on the
-  platform's `bus.js`, `npm run budget`, or `cost-tracker.js`.
+  and project `.opencode/opencode.json` files). It does not hook into any
+  platform-internal module or cost CLI — it is purely observational: pricing
+  comes from the model catalog and the Go/Zen docs Atom feeds, usage/quota from
+  the `/zen/go/v1/usage` API, and local spend from `opencode.db`. There is no
+  cost-enforcement, routing, or billing subsystem — it only reports what it sees.
 - Provider of interest: `opencode-go` (base URL `https://opencode.ai/zen/go/v1`).
 - Targets OpenCode v2 (reads the hosted `opencode-go` model/usage data; no
   session hooks required).
