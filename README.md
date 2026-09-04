@@ -232,9 +232,11 @@ next to `config.json`:
 - `webhookUrl` **or** `webhookEnv` — the destination. Use `webhookEnv` to point
   at an environment variable (e.g. `MODEL_MONITOR_DISCORD_WEBHOOK`) so the
   secret never lives in the file. The file is gitignored regardless.
-- `levels` — subset of `info | model_change | warning | critical`. An alert is
-  delivered to a subscriber only if its level is in this list (so `info`
-  heartbeat cycles are excluded unless you opt in).
+- `levels` — subset of `info | model_change | warning | critical | digest`. An
+  alert is delivered to a subscriber only if its level is in this list (so `info`
+  heartbeat cycles are excluded unless you opt in). The `digest` level (and
+  `info`, for convenience) additionally receives the periodic human-readable
+  summary — see [Discord digest](#discord-digest-periodic-summaries) below.
 
 On each alert the monitor `POST`s a JSON body to every matching subscriber.
 **Slack / custom** endpoints receive the Slack-shaped
@@ -264,6 +266,36 @@ forum example in `subscribers.example.json`.
 3. Test instantly with a one-shot run: `MODEL_MONITOR_WEBHOOK= URL node src/monitor.js --once` — or just watch `state/alerts.log` for your subscriber name on the next alert.
 
 A ready-to-edit template lives at [`config.example.json`](config.example.json).
+
+#### Discord digest (periodic summaries)
+
+Alerts tell you *something happened*; the digest tells you *what changed and
+what's coming* — a human-readable summary for the Discord channel to become the
+alert **and** report hub. Each digest contains:
+
+- a header (auto-posted) with the generated timestamp,
+- **Pricing** — models tracked + any changes,
+- **Changes — last 7 days** — quota movement (rolling/weekly/monthly Δ/7d) and
+  recent events from the changelog,
+- **Upcoming** — next quota resets and projected warn/critical threshold dates.
+
+Opt in by adding `"digest"` to a subscriber's `levels` (a subscriber with
+`"info"` also receives it). The monitor posts the digest:
+
+- **every 24h** while running continuously (`setInterval` alongside the other
+  feed loops), and
+- **on demand** with `node src/monitor.js --digest-once` (posts the current
+  `state/report.json` summary once, then exits — no monitor cycle is scheduled).
+
+```bash
+node src/monitor.js --digest-once   # push the current 7-day summary to Discord now
+```
+
+Long reports are split into multiple sequential Discord posts, each chunked on
+newlines and capped at **1900 chars** (well under Discord's 2000-char `content`
+limit) so a post is never dropped. The digest reuses the same Discord
+`{ content, username }` shape and forum-`?thread_name=`/`?thread_id=` handling
+as single alerts.
 
 ## Run continuously
 

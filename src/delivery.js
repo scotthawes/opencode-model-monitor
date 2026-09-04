@@ -244,6 +244,65 @@ function buildSubscriberDelivery(sub, url, level, title, message) {
   return { url, payload };
 }
 
+// Deliver a raw, pre-formatted message body to one subscriber, choosing the
+// Discord { content } vs Slack/custom { text } shape based on the URL (mirrors
+// buildSubscriberDelivery) but WITHOUT the [LEVEL] title prefix. Used by the
+// periodic digest, which posts full report chunks rather than single alerts.
+async function deliverRawContent(sub, content) {
+  let url = sub.webhookUrl;
+  if (!url && sub.webhookEnv) url = process.env[sub.webhookEnv];
+  if (!url) return;
+  const isDiscord = DISCORD_WEBHOOK_RE.test(url || '');
+  const payload = isDiscord
+    ? {
+        content: content.length > DISCORD_CONTENT_MAX ? content.slice(0, DISCORD_CONTENT_MAX) : content,
+        username: DISCORD_USERNAME
+      }
+    : { text: content };
+  if (isDiscord && sub) {
+    const hasThreadName = /[?&]thread_name=/i.test(url);
+    const hasThreadId = /[?&]thread_id=/i.test(url);
+    if (!hasThreadName && !hasThreadId) {
+      if (sub.threadId) url = appendQuery(url, 'thread_id', sub.threadId);
+      else if (sub.threadName) url = appendQuery(url, 'thread_name', sub.threadName);
+    }
+  }
+  await deliverToSubscriber(sub, url, payload);
+}
+
+// Whether a subscriber should receive a message of `level`. The periodic digest
+// (`level === 'digest'`) is also delivered to subscribers that opted into
+// `info`, so a single opt-in covers both human-readable summaries and the
+// (separate) lifecycle `info` heartbeats. Everything else matches exactly.
+function subscriberWants(sub, level) {
+  if (!sub || !Array.isArray(sub.levels)) return false;
+  if (sub.levels.includes(level)) return true;
+  if (level === 'digest' && sub.levels.includes('info')) return true;
+  return false;
+}
+
+// Fan a raw, pre-formatted message out to every subscriber whose filter wants
+// `level`. Tracked in inFlight so flush() awaits delivery before exit.
+// `subscribersOverride` lets callers (tests) supply their own list instead of
+// the module-level SUBSCRIBERS loaded from subscribers.json.
+async function sendToSubscribers(level, content, subscribersOverride) {
+  const list = Array.isArray(subscribersOverride) ? subscribersOverride : SUBSCRIBERS;
+  for (const sub of list) {
+    try {
+      if (!subscriberWants(sub, level)) continue;
+      track(deliverRawContent(sub, content));
+    } catch (_) {
+      // A structurally broken entry must not stop the fan-out.
+    }
+  }
+}
+
+// Test/override hook for the subscriber list (otherwise loaded from
+// subscribers.json). Kept small and explicit; production never calls this.
+function setSubscribers(arr) {
+  SUBSCRIBERS = Array.isArray(arr) ? arr : [];
+}
+
 let SUBSCRIBERS = [];
 
 function subscribersPath() {
@@ -869,5 +928,7 @@ module.exports = {
   setKnownModelIds,
   loadSubscribers,
   deliverToSubscriber,
-  buildSubscriberDelivery
+  buildSubscriberDelivery,
+  sendToSubscribers,
+  setSubscribers
 };
