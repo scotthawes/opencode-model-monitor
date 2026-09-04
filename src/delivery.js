@@ -342,6 +342,26 @@ function notifyViaOsascript(notifyTitle, notifyMessage, subtitle, soundName) {
   });
 }
 
+// Guaranteed audible fallback using afplay (macOS only). We cannot trust
+// osascript's `sound name "Ping"`: it exits 0 even for bogus names and when
+// banners are suppressed (Focus / Do Not Disturb / previews locked). So a
+// warning/critical notification can be completely silent while osascript
+// reports success. afplay plays the AIFF directly through the audio device;
+// it was verified audible by the user. Best-effort: 5s timeout, any error is
+// logged at most as a WARNING, and this promise never rejects/throws.
+function notifyViaAfplay(soundName) {
+  return new Promise((resolve) => {
+    if (process.platform !== 'darwin' || !soundName) return resolve(null);
+    const file = `/System/Library/Sounds/${soundName}.aiff`;
+    execFile('afplay', [file], { timeout: 5000 }, (err) => {
+      if (err) {
+        logDesktopWarning(`afplay failed: ${err.message || err}`);
+      }
+      resolve(null);
+    });
+  });
+}
+
 // node-notifier path with callback + 3s timeout race. The earlier silent
 // implementation called notify() without a callback, so a backend that never
 // invokes the callback (terminal-notifier hang) left the promise unsettled
@@ -519,6 +539,18 @@ async function alert(level, title, message, opts) {
           const osaErr = await notifyViaOsascript(notifyTitle, notifyMessage, notifySubtitle, soundName);
           if (osaErr) {
             logDesktopWarning(`osascript failed: ${osaErr.message || osaErr}`);
+          }
+          // Guaranteed audible fallback. osascript's `sound name` is unreliable
+          // (silent success), so for warning/critical we ALWAYS play the mapped
+          // sound via afplay to guarantee the user hears it even when the banner
+          // is missed/suppressed. For info/model_change we only afplay when
+          // osascript failed (a healthy banner then needs no extra sound).
+          // Never throws — failures are logged at most as a WARNING above.
+          const alwaysAudible = level === 'warning' || level === 'critical';
+          if (alwaysAudible || osaErr) {
+            await notifyViaAfplay(soundName);
+          }
+          if (osaErr) {
             const nnErr = await notifyViaNotifier(notifyTitle, notifyMessage);
             if (nnErr) {
               logDesktopWarning(`node-notifier fallback failed: ${nnErr.message || nnErr}`);
