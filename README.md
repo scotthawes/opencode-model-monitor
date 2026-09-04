@@ -52,6 +52,10 @@ node src/monitor.js          # continuous; writes alerts to state/alerts.log + s
 > `npm run monitor:once` / `npm run monitor` work too, but they require `npm`
 > on PATH. The `node` commands above only need Node itself.
 
+> **`--once` lock note:** if another monitor run still holds the state lock,
+> `--once` exits `2`. Re-run with `node src/monitor.js --once --force` to
+> override the stale lock.
+
 `npm install` (optional) enables desktop notifications via `node-notifier`:
 
 You'll get alerts (in `state/alerts.log` and `state/report.md`) when:
@@ -96,15 +100,16 @@ Pricing/announcement changes may also surface via the Go/Zen docs Atom feeds
 ### Install
 
 ```bash
-git clone <repo> && cd model-budget-guard
-# Optional: desktop notifications (macOS/Windows/Linux)
-npm i node-notifier
+git clone https://github.com/scotthawes/opencode-model-monitor && cd opencode-model-monitor
+npm install          # installs dependencies, including node-notifier for desktop notifications
 ```
 
 The default run path uses only Node.js built-ins (global `fetch`, `fs`, `path`,
 `os`), so it works with **no** `npm install` and no external packages. Desktop
 notifications are lazily required inside a `try/catch`, so they're silently
 skipped unless `node-notifier` is installed **and** `delivery.desktop` is enabled.
+`node-notifier` is listed in `package.json` as a dependency, so a single
+`npm install` brings it in — you do **not** need to install it separately.
 
 ### Run
 
@@ -387,7 +392,7 @@ The monitor appends to `state/alerts.log` and `state/changelog.log` forever.
 Rotate them (they are plain text) with `logrotate`, e.g.:
 
 ```
-/Users/you/model-budget-guard/state/*.log {
+/PATH/TO/opencode-model-monitor/state/*.log {
     weekly
     missingok
     notifempty
