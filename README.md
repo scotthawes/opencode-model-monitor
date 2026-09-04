@@ -175,6 +175,25 @@ can optionally enable richer delivery channels:
   The channel is best-effort: if `node-notifier` is missing it is silently
   skipped, and a failed notification never breaks the monitor.
 
+  > **Make macOS alerts prominent.** By default macOS *banners* auto-dismiss
+  > after a few seconds and only linger in Notification Center — easy to miss.
+  > The monitor now addresses this two ways:
+  > - **Sound:** every desktop alert plays a sound so it's audible even if you
+  >   glance away — `Glass` for `info`/`model_change`, `Ping` for `warning`, and
+  >   the louder `Sosumi` for `critical`.
+  > - **Glanceable subtitle:** `warning` / `critical` / `model_change` alerts put
+  >   the `LEVEL · <timestamp>` in the subtitle so they stand out when grouped in
+  >   Notification Center.
+  >
+  > **Sticky (no auto-dismiss):** Alert *style* is a per-app OS choice the
+  > monitor can't set itself. To make popups persist until you dismiss them:
+  > open **System Settings → Notifications → Terminal** (the app running the
+  > monitor; use **Script Editor** if you invoke `osascript` directly), then set
+  > **Style: Alerts** (stays on screen until dismissed), enable **Play sound**,
+  > and turn on **Show on Lock Screen**. Combined with the `sound name` above,
+  > you get a persistent, audible popup. (We deliberately avoid `display dialog`
+  > modal alerts — they would block the monitor.)
+
 - **Webhook** — `POST` a JSON alert to any URL (Slack/Discord/custom). Payload:
   ```json
   { "level": "info|warning|critical|model_change",
