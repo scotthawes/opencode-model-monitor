@@ -41,6 +41,14 @@ let dedupTtlMs = 86400000;
 // than this are pruned so the report only shows recent, recallable changes.
 let changelogRetentionMs = 7 * 24 * 60 * 60 * 1000;
 
+// Fixed 7-day window used for quota-movement and projection math. Intentionally
+// hardcoded (not config) to match changelogRetentionDays' default semantics.
+const SEVEN_DAY_MS = 7 * 24 * 3600 * 1000;
+// Small grace so a sample sitting right on the 7-day boundary (e.g. captured
+// exactly 7 days ago) is still counted as "within 7 days" despite clock drift
+// between when `now` is sampled and when the report is generated.
+const WINDOW_GRACE_MS = 60000;
+
 // Directory the dedup store is persisted to (defaults to STATE_DIR at call time).
 let DEDUP_DIR = null;
 
@@ -313,8 +321,64 @@ async function alert(level, title, message, opts) {
   }
 }
 
+// Best-effort read of the usage time-series from STATE_DIR. Returns the array of
+// samples (or [] if missing/corrupt). Never throws.
+function readUsageHistory() {
+  try {
+    const raw = fs.readFileSync(path.join(STATE_DIR, 'usage-history.json'), 'utf8');
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+// Compute 7-day quota movement for a single window from the time-series.
+// Picks the oldest sample still inside the 7-day window (falling back to the
+// oldest sample overall when none is within the window / has a value). Returns
+// { current, oldest, delta, oldestTs, daysElapsed } or null when the window has
+// no usable current value.
+function windowInfo(history, win, now) {
+  now = now || Date.now();
+  if (!history.length) return null;
+  const latest = history[history.length - 1];
+  const current = typeof latest[win] === 'number' ? latest[win] : null;
+  if (current == null) return null;
+
+  // Oldest sample within the 7-day window that has a numeric value for this win.
+  let oldestInWindow = null;
+  for (const s of history) {
+    if (now - s.ts <= SEVEN_DAY_MS + WINDOW_GRACE_MS && typeof s[win] === 'number') {
+      if (oldestInWindow == null || s.ts < oldestInWindow.ts) oldestInWindow = s;
+    }
+  }
+
+  let oldestSample = null;
+  let oldestTs = null;
+  if (oldestInWindow) {
+    oldestSample = oldestInWindow[win];
+    oldestTs = oldestInWindow.ts;
+  } else {
+    // None in window (or none with a value) — use the oldest sample overall.
+    for (const s of history) {
+      if (typeof s[win] === 'number') {
+        if (oldestSample == null || s.ts < oldestTs) {
+          oldestSample = s[win];
+          oldestTs = s.ts;
+        }
+      }
+    }
+  }
+  if (oldestSample == null || oldestTs == null) return null;
+
+  const daysElapsed = (now - oldestTs) / 864e5;
+  return { current, oldest: oldestSample, delta: current - oldestSample, oldestTs, daysElapsed };
+}
+
 function renderMarkdown(report) {
   const lines = [];
+  const now = Date.now();
+  const history = readUsageHistory();
   lines.push('# OpenCode Model Monitor — Report');
   lines.push('');
   lines.push(`Generated: ${report.generatedAt || 'unknown'}`);
@@ -346,15 +410,25 @@ function renderMarkdown(report) {
   lines.push('## Usage / Quota');
   lines.push('');
   const u = report.usage || {};
+  // Resolve the per-window quota object robustly: the real report nests it under
+  // `usage.usage`, while a direct mock may pass the windows flat under `usage`.
+  const usageWin = u.usage ? u.usage : u;
   if (u.status === 'unknown') {
     lines.push(`Status: unknown${u.error ? ' — ' + u.error : ''}`);
-  } else if (u.usage) {
+  } else if (usageWin && (usageWin.rolling || usageWin.weekly || usageWin.monthly)) {
     for (const win of ['rolling', 'weekly', 'monthly']) {
-      const w = u.usage[win];
+      const w = usageWin[win];
       if (!w) continue;
       const pct = w.percent != null ? w.percent + '%' : '?';
       const resets = w.resetsAt ? ` (resets ${w.resetsAt})` : '';
-      const deltaStr = w.delta != null ? ` (Δ ${w.delta}pts vs prev)` : '';
+      const wi = windowInfo(history, win, now);
+      let deltaStr = '';
+      if (wi && wi.delta != null) {
+        const sign = wi.delta > 0 ? '+' : '';
+        deltaStr = ` (Δ ${sign}${wi.delta}pts / 7d)`;
+      } else if (w.delta != null) {
+        deltaStr = ` (Δ ${w.delta}pts vs prev)`;
+      }
       lines.push(`- ${win}: ${pct} — ${w.status || '?'}${resets}${deltaStr}`);
     }
   } else {
@@ -401,13 +475,27 @@ function renderMarkdown(report) {
   }
   lines.push('');
 
-  // Recent changes (persistent changelog) — newest first, within retention window
-  lines.push('## Recent changes');
+  // Changes — last 7 days (quota movement + discrete events)
+  lines.push('## Changes — last 7 days');
+  lines.push('');
+  lines.push('**Quota movement (7d)**:');
+  lines.push('');
+  for (const win of ['rolling', 'weekly', 'monthly']) {
+    const wi = windowInfo(history, win, now);
+    if (wi && wi.current != null && wi.delta != null) {
+      const sign = wi.delta > 0 ? '+' : '';
+      lines.push(`- Quota ${win}: ${wi.current}% (Δ ${sign}${wi.delta}pts / 7d)`);
+    } else {
+      lines.push(`- Quota ${win}: n/a`);
+    }
+  }
+  lines.push('');
+  lines.push('**Events**:');
   lines.push('');
   try {
     const raw = fs.readFileSync(path.join(STATE_DIR, 'changelog.json'), 'utf8');
     const arr = JSON.parse(raw);
-    const cutoff = Date.now() - changelogRetentionMs;
+    const cutoff = now - changelogRetentionMs;
     const within = Array.isArray(arr)
       ? arr.filter((e) => (e.ts ? Date.parse(e.ts) : 0) >= cutoff)
       : [];
@@ -420,10 +508,52 @@ function renderMarkdown(report) {
         );
       }
     } else {
-      lines.push('No changes recorded yet.');
+      lines.push('- No discrete changes recorded.');
     }
   } catch (_) {
-    lines.push('No changes recorded yet.');
+    lines.push('- No discrete changes recorded.');
+  }
+  lines.push('');
+
+  // Upcoming (resets + projected threshold crossings)
+  lines.push('## Upcoming');
+  lines.push('');
+  lines.push('**Quota resets**:');
+  lines.push('');
+  const upcomingUsage = report.usage && report.usage.usage ? report.usage.usage : report.usage || {};
+  let anyReset = false;
+  for (const win of ['rolling', 'weekly', 'monthly']) {
+    const w = upcomingUsage[win];
+    if (w && w.resetsAt) {
+      lines.push(`- ${win} resets: ${w.resetsAt}`);
+      anyReset = true;
+    }
+  }
+  if (!anyReset) lines.push('- No upcoming resets.');
+  lines.push('');
+  lines.push('**Projected threshold crossings**:');
+  lines.push('');
+  for (const win of ['rolling', 'weekly', 'monthly']) {
+    const wi = windowInfo(history, win, now);
+    if (!history.length || !wi) {
+      lines.push(`- ${win} projection: n/a`);
+      continue;
+    }
+    const { current, delta, daysElapsed } = wi;
+    const rate = daysElapsed > 0 ? delta / daysElapsed : 0;
+    if (rate <= 0) {
+      lines.push(`- ${win} projection: stable (no increase detected)`);
+    } else if (current >= 80) {
+      lines.push(`- ${win}: already at/above warn threshold`);
+    } else {
+      const daysToWarn = (80 - current) / rate;
+      const daysToCrit = (95 - current) / rate;
+      const warnDate = new Date(now + daysToWarn * 864e5).toISOString().slice(0, 10);
+      const critDate = new Date(now + daysToCrit * 864e5).toISOString().slice(0, 10);
+      lines.push(
+        `- ${win} projection: ~80% warn on ${warnDate}, ~95% crit on ${critDate}`
+      );
+    }
   }
   lines.push('');
 
