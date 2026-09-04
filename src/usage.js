@@ -99,7 +99,14 @@ async function runUsage(authJsonPath, thresholds, stateDir) {
   }
 
   const usage = data && data.usage ? data.usage : null;
-  if (!usage) return { status: 'unknown', error: 'no usage field' };
+  if (!usage) {
+    // Previously this returned silently — subscribers saw nothing while usage
+    // silently broke. Surface it as a deduped warning so degradation is visible.
+    delivery.alert('warning', 'Usage data missing', 'usage field absent in provider response', {
+      dedupKey: 'usage:missing'
+    });
+    return { status: 'unknown', error: 'no usage field' };
+  }
 
   const warn = thresholds && typeof thresholds.warning === 'number' ? thresholds.warning : 80;
   const crit = thresholds && typeof thresholds.critical === 'number' ? thresholds.critical : 95;

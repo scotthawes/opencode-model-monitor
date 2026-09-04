@@ -311,6 +311,11 @@ async function postDigest(opts) {
   const send = opts.send || delivery.sendToSubscribers;
   for (const chunk of chunks) {
     await send('digest', chunk);
+    // Legacy webhook parity: also push the digest to CONFIG.webhook (in addition
+    // to subscribers) when configured. No-op if unset. Best-effort, never throws.
+    if (!opts || !opts.skipWebhook) {
+      await delivery.deliverDigestToWebhook(chunk);
+    }
   }
   return chunks;
 }

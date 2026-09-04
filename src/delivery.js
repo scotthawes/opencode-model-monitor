@@ -358,6 +358,33 @@ async function deliverToSubscriber(sub, url, payload) {
   }
 }
 
+// POST a JSON payload to a single webhook URL with a 10s AbortController timeout
+// (matching the subscriber path at SUBSCRIBER_TIMEOUT_MS) so a hung endpoint can
+// never stall delivery. Best-effort: any failure is logged to alerts.log as a
+// WARNING and never thrown. Reused by the legacy CONFIG.webhook alert path and
+// the digest fan-out to the same endpoint.
+async function postToWebhook(url, payload) {
+  if (!url) return;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SUBSCRIBER_TIMEOUT_MS);
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+  } catch (e) {
+    try {
+      fs.appendFileSync(
+        path.join(STATE_DIR, 'alerts.log'),
+        `[${ts()}] WARNING | Webhook delivery failed | ${e && e.message ? e.message : e}\n`
+      );
+    } catch (_) {}
+  } finally {
+    clearTimeout(timer);
+  }
+}
 // Wait for all in-flight delivery promises to settle. Safe to call multiple
 // times; resolves once nothing is pending.
 async function flush() {
@@ -516,7 +543,10 @@ async function alert(level, title, message, opts) {
   ensureConfig();
 
   // Dedup cross-source model_change alerts within the TTL window. Other
-  // levels (info/config pins, warning, critical) are delivered as-is.
+  // levels (info/config pins, warning, critical) are delivered as-is unless the
+  // caller opts a specific alert into dedup via opts.dedupKey (used by the
+  // recurring "Usage data missing" degradation warning so it fires at most once
+  // per TTL instead of every cycle).
   if (level === 'model_change') {
     const key = computeDedupKey(title, message);
     if (key) {
@@ -528,6 +558,15 @@ async function alert(level, title, message, opts) {
       dedupStore.set(key, now);
       saveDedup();
     }
+  } else if (opts && opts.dedupKey) {
+    const key = 'reserved:' + opts.dedupKey;
+    const now = Date.now();
+    const prev = dedupStore.get(key);
+    if (prev != null && now - prev < dedupTtlMs) {
+      return { delivered: false }; // suppressed — same degradation already alerted within TTL
+    }
+    dedupStore.set(key, now);
+    saveDedup();
   }
 
   const line = `[${ts()}] ${String(level).toUpperCase()} | ${title} | ${message}`;
@@ -640,19 +679,7 @@ async function alert(level, title, message, opts) {
   }
 
   if (CONFIG.webhook) {
-    track(
-      (async () => {
-        try {
-          await fetch(CONFIG.webhook, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ level, title, message, ts: ts() })
-          });
-        } catch (_) {
-          // best effort
-        }
-      })()
-    );
+    track(postToWebhook(CONFIG.webhook, { level, title, message, ts: ts() }));
   }
 
   // Persistent subscriber fan-out. For every subscriber whose `levels` filter
@@ -1086,6 +1113,16 @@ async function deliverModelChangeTableToDiscord(content) {
   }
 }
 
+// Route a raw digest content chunk to the configured legacy webhook (if any), in
+// addition to the subscriber fan-out — parity with the alert path. Tracked so
+// flush() awaits before exit. Best-effort, never throws.
+async function deliverDigestToWebhook(content) {
+  if (!CONFIG || !CONFIG.webhook) return;
+  const finalContent =
+    content.length > DISCORD_CONTENT_MAX ? content.slice(0, DISCORD_CONTENT_MAX) : content;
+  track(postToWebhook(CONFIG.webhook, { level: 'digest', content: finalContent, ts: ts() }));
+}
+
 module.exports = {
   configure,
   alert,
@@ -1104,5 +1141,6 @@ module.exports = {
   readUsageHistory,
   windowInfo,
   deliverModelChangeTable,
-  buildModelChangeChunks
+  buildModelChangeChunks,
+  deliverDigestToWebhook
 };
