@@ -338,3 +338,98 @@ What it watches (Phase 1):
 
 > This is the **monitoring-only** phase. It never intervenes in a running
 > session, never downgrades a model, and never enforces a budget.
+
+## Production
+
+Everything above is zero-config. For a real deployment, the only setup is
+pointing the monitor at **your** ping channel.
+
+### Onboarding — add your own webhook in 5 steps
+
+```bash
+npm run add-webhook
+```
+
+The CLI walks you through it:
+
+1. **Name** — a label for logs (default `my-discord`).
+2. **Destination** — paste your Discord/Slack *incoming-webhook* URL, **or** type
+   `env` and give an environment-variable name (the secret stays in your shell /
+   service env, never in the file).
+3. **Levels** — which alerts to receive. Comma-separated; default
+   `model_change,warning,critical,digest` (also allowed: `info`).
+4. **Validation + detection** — the URL is checked (must be `https://`;
+   `discord.com/api/webhooks`, `hooks.slack.com`, or any generic `https` host),
+   and the platform is auto-detected so the right payload shape is used.
+5. **Live test** — the monitor sends a real test POST through its own delivery
+   path and asks *"Did you see it? (y/n)"*. Say `n` and it lets you re-enter the
+   URL. Say `y` and you're done.
+
+The entry is merged into the gitignored `subscribers.json` (file mode `0600`,
+existing subscribers preserved, names never duplicated — an existing name
+prompts to overwrite). Multiple subscribers with different level filters are
+fine.
+
+### Secrets
+
+- `subscribers.json` is **gitignored** — never commit it. Put the webhook secret
+  in the URL *or*, preferably, use the `env` option and export the variable in
+  your service environment (see the install scripts / Docker `--env`).
+- `config.json` (if used) is also gitignored.
+- No state (`state/`) is committed either.
+
+### Log rotation
+
+The monitor appends to `state/alerts.log` and `state/changelog.log` forever.
+Rotate them (they are plain text) with `logrotate`, e.g.:
+
+```
+/Users/you/model-budget-guard/state/*.log {
+    weekly
+    missingok
+    notifempty
+    copytruncate
+}
+```
+
+(`copytruncate` avoids signalling the monitor; it never reopens the file on its
+own. On Linux the equivalent path is `~/.local/share/...` or wherever you cloned.)
+
+### Health check
+
+A healthy monitor exits `0` on a single cycle:
+
+```bash
+node src/monitor.js --once   # exit code 0 == healthy
+echo $?
+```
+
+Use that as a liveness probe (cron, Docker `HEALTHCHECK`, or a watchloop).
+
+### Docker
+
+```bash
+docker build -t opencode-model-monitor .
+docker run -d --restart=unless-stopped \
+  -v "$PWD/subscribers.json:/app/subscribers.json:ro" \
+  -v "$PWD/state:/app/state" \
+  --name opencode-model-monitor \
+  opencode-model-monitor
+```
+
+Mount your `subscribers.json` and `state/` from the host (both are gitignored).
+The image runs `node src/monitor.js` (continuous mode) by default.
+
+### Linux (systemd user service)
+
+```bash
+bash scripts/install-linux.sh
+# edits deploy/opencode-model-monitor.service in place, then:
+systemctl --user enable --now opencode-model-monitor.service
+```
+
+### macOS (launchd LaunchAgent)
+
+```bash
+bash scripts/install-macos.sh
+```

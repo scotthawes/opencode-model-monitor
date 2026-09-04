@@ -1,0 +1,9 @@
+node_modules
+state
+subscribers.json
+config.json
+.git
+.gitignore
+Dockerfile
+.dockerignore
+*.log
