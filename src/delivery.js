@@ -523,7 +523,7 @@ async function alert(level, title, message, opts) {
       const now = Date.now();
       const prev = dedupStore.get(key);
       if (prev != null && now - prev < dedupTtlMs) {
-        return; // suppressed — already alerted for this model within TTL
+        return { delivered: false }; // suppressed — already alerted for this model within TTL
       }
       dedupStore.set(key, now);
       saveDedup();
@@ -670,12 +670,17 @@ async function alert(level, title, message, opts) {
       let url = sub.webhookUrl;
       if (!url && sub.webhookEnv) url = process.env[sub.webhookEnv];
       if (!url) continue; // nothing resolvable to deliver to
+      // When the table path handles Discord presentation, skip only Discord-shaped
+      // endpoints and still deliver the plain line to non-Discord (Slack) ones.
+      if (opts && opts.skipDiscord && DISCORD_WEBHOOK_RE.test(url || '')) continue;
       const { url: finalUrl, payload } = buildSubscriberDelivery(sub, url, level, title, message);
       track(deliverToSubscriber(sub, finalUrl, payload));
     } catch (_) {
       // A structurally broken entry must not crash the alert path.
     }
   }
+
+  return { delivered: true };
 }
 
 // Best-effort read of the usage time-series from STATE_DIR. Returns the array of
@@ -930,6 +935,157 @@ function writeReport(report) {
   }
 }
 
+// --- Model-change table delivery -----------------------------------------
+//
+// price-watch emits per-model changes (added / removed / cost / tiers). The
+// plain `Cost changed for hy3: {...} -> {...}` line is hard to scan in Discord,
+// so we ALSO build an aggregated, Discord-friendly table of those changes and
+// deliver it as ONE post (chunked if large) to Discord subscribers. alerts.log
+// keeps the original human-readable single lines; the table only enhances the
+// Discord presentation. Dedup still applies per-model via alert()'s TTL check,
+// so a model re-alerted within the window is skipped entirely (table included).
+//
+// ch shape (one of):
+//   { subtype: 'cost',    model, oldCost, newCost }
+//   { subtype: 'added',   model, cost }
+//   { subtype: 'removed', model }
+//   { subtype: 'tiers',   model }
+
+const MODEL_TABLE_MAX = 1900; // Discord content cap w/ headroom (hard limit 2000)
+const MODEL_TABLE_MAX_ROWS = 10; // rows per post before a "+N more" tail
+
+// Format a cost metric for the table: up to 6 sig figs, trailing zeros dropped
+// (e.g. 0.004375, 0.14, 2.5). Missing/NaN becomes an em-dash.
+function fmtModelCost(x) {
+  if (x == null) return '—';
+  const n = Number(x);
+  if (isNaN(n)) return '—';
+  return String(parseFloat(n.toPrecision(6)));
+}
+
+function truncateModelId(s, n) {
+  s = String(s == null ? '' : s);
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+// One cost-change table row: "hy3 | 0.0175→0.14 | 0.0725→0.58 | 0.004375→0.035"
+function modelChangeRowStr(r) {
+  const cell = (k) => `${fmtModelCost(r.oldCost && r.oldCost[k])}→${fmtModelCost(r.newCost && r.newCost[k])}`;
+  return `${truncateModelId(r.model, 22)} | ${cell('input')} | ${cell('output')} | ${cell('cache_read')}`;
+}
+
+function modelChangeLineStr(l) {
+  if (l.subtype === 'added') {
+    const c = l.cost || {};
+    return `🟢 ${l.model} ADDED — input ${fmtModelCost(c.input)} / output ${fmtModelCost(c.output)}`;
+  }
+  if (l.subtype === 'removed') return `⚫ ${l.model} REMOVED`;
+  if (l.subtype === 'tiers') return `⚪ ${l.model} TIERS changed`;
+  return `• ${l.model} ${l.subtype || 'changed'}`;
+}
+
+// Human-readable single line (matches price-watch's legacy string format so the
+// changelog + discord-digest regex keep working) for the alerts.log entry.
+function modelChangeHumanMessage(ch) {
+  if (ch.subtype === 'cost') {
+    return `Cost changed for ${ch.model}: ${JSON.stringify(ch.oldCost)} -> ${JSON.stringify(ch.newCost)}`;
+  }
+  if (ch.subtype === 'added') return `Added model: ${ch.model}`;
+  if (ch.subtype === 'removed') return `Removed model: ${ch.model}`;
+  if (ch.subtype === 'tiers') return `Tiers changed for ${ch.model}`;
+  return `Model changed: ${ch.model}`;
+}
+
+// Build one-or-more Discord content chunks (each <=1900 chars) from a batch of
+// model changes. Cost changes become a fenced code-block table (paginated at 10
+// rows with a "+N more" tail); added/removed/tiers become scannable lines in the
+// first chunk. Never exceeds Discord's 2000-char hard limit (deliverRawContent
+// caps as a final safety net).
+function buildModelChangeChunks(rows, lines) {
+  const head = (rowCount, lineCount) => {
+    const total = (rowCount || 0) + (lineCount || 0);
+    const emoji = rowCount ? '🔴' : '🔵';
+    return `**Model change** ${emoji} ${total} model${total === 1 ? '' : 's'} updated`;
+  };
+  const chunks = [];
+  if (!rows || !rows.length) {
+    let body = head(0, (lines || []).length);
+    for (const l of lines || []) body += '\n' + modelChangeLineStr(l);
+    chunks.push(body.length > MODEL_TABLE_MAX ? body.slice(0, MODEL_TABLE_MAX) : body);
+    return chunks;
+  }
+  const tableHeader = 'Model | Input | Output | Cache';
+  for (let i = 0; i < rows.length; i += MODEL_TABLE_MAX_ROWS) {
+    const page = rows.slice(i, i + MODEL_TABLE_MAX_ROWS);
+    let body = head(rows.length, lines ? lines.length : 0);
+    const table = '```\n' + tableHeader + '\n' + page.map(modelChangeRowStr).join('\n') + '\n```';
+    body += '\n' + table;
+    // Added/removed/tiers lines ride along in the first chunk only.
+    if (i === 0 && lines && lines.length) {
+      for (const l of lines) body += '\n' + modelChangeLineStr(l);
+    }
+    if (i + MODEL_TABLE_MAX_ROWS < rows.length) {
+      body += `\n… +${rows.length - i - MODEL_TABLE_MAX_ROWS} more model(s) — cost`;
+    }
+    chunks.push(body.length > MODEL_TABLE_MAX ? body.slice(0, MODEL_TABLE_MAX) : body);
+  }
+  return chunks;
+}
+
+// Deliver an aggregated model-change table to Discord targets. Returns the
+// chunks that were posted (handy for tests / manual runs). `opts.send` injects a
+// custom delivery fn (content) => Promise; otherwise the table is fanned out to
+// Discord subscribers (model_change level) + a Discord-shaped CONFIG.webhook.
+async function deliverModelChangeTable(changes, opts) {
+  opts = opts || {};
+  ensureConfig();
+  const rows = [];
+  const lines = [];
+  for (const ch of changes || []) {
+    const msg = modelChangeHumanMessage(ch);
+    // Log the human-readable single line (changelog + alerts.log), applying the
+    // existing per-model dedup. skipDiscord keeps alert() from ALSO posting the
+    // plain line to Discord — the table below is the single Discord view.
+    const res = await alert('model_change', 'Model changed', msg, { skipDiscord: true });
+    if (!(res && res.delivered)) continue; // suppressed by dedup
+    if (ch.subtype === 'cost') rows.push(ch);
+    else lines.push(ch);
+  }
+  if (!rows.length && !lines.length) return [];
+  const chunks = buildModelChangeChunks(rows, lines);
+  const send = opts.send || deliverModelChangeTableToDiscord;
+  for (const c of chunks) await send(c);
+  return chunks;
+}
+
+// Default Discord delivery for the model-change table: Discord-shaped subscriber
+// URLs get a { content } payload (truncated to 2000); a Discord-shaped legacy
+// CONFIG.webhook also receives it. Tracked so flush() awaits before exit.
+async function deliverModelChangeTableToDiscord(content) {
+  const finalContent =
+    content.length > DISCORD_CONTENT_MAX ? content.slice(0, DISCORD_CONTENT_MAX) : content;
+  for (const sub of SUBSCRIBERS) {
+    try {
+      if (!sub || !Array.isArray(sub.levels) || !sub.levels.includes('model_change')) continue;
+      let url = sub.webhookUrl;
+      if (!url && sub.webhookEnv) url = process.env[sub.webhookEnv];
+      if (!url) continue;
+      if (!DISCORD_WEBHOOK_RE.test(url)) continue; // non-Discord subscribers keep the plain line
+      track(deliverRawContent(sub, finalContent));
+    } catch (_) {
+      // best effort
+    }
+  }
+  if (CONFIG && CONFIG.webhook && DISCORD_WEBHOOK_RE.test(CONFIG.webhook || '')) {
+    track(
+      deliverToSubscriber({ name: 'webhook' }, CONFIG.webhook, {
+        content: finalContent,
+        username: DISCORD_USERNAME
+      })
+    );
+  }
+}
+
 module.exports = {
   configure,
   alert,
@@ -946,5 +1102,7 @@ module.exports = {
   setStateDir,
   getStateDir,
   readUsageHistory,
-  windowInfo
+  windowInfo,
+  deliverModelChangeTable,
+  buildModelChangeChunks
 };

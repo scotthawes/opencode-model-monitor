@@ -13,6 +13,28 @@ const discordDigest = require('./discord-digest');
 // Post the periodic Discord digest on this cadence while running continuously.
 const DIGEST_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
+// Build a demo model-change table from the last real hy3 numbers: take hy3's
+// current cost as the "new" values and derive the "old" by dividing by 8 (the
+// real 8x jump hy3 took). Returns one-or-more Discord-safe content chunks.
+function buildDemoModelTable(stateDir) {
+  let cost = null;
+  try {
+    const snap = JSON.parse(fs.readFileSync(path.join(stateDir, 'pricing-snapshot.json'), 'utf8'));
+    cost = snap && snap['hy3'] && snap['hy3'].cost;
+  } catch (_) {
+    cost = null;
+  }
+  if (!cost || !cost.input) {
+    cost = { input: 0.14, output: 0.58, cache_read: 0.035 };
+  }
+  const oldCost = {};
+  for (const k of Object.keys(cost)) oldCost[k] = cost[k] / 8;
+  return delivery.buildModelChangeChunks(
+    [{ subtype: 'cost', model: 'hy3', oldCost, newCost: cost }],
+    []
+  );
+}
+
 async function main() {
   const config = loadConfig();
   const stateDir = path.join(__dirname, '..', 'state');
@@ -21,9 +43,33 @@ async function main() {
 
   const once = process.argv.includes('--once') || process.argv.includes('-1');
   const digestOnce = process.argv.includes('--digest-once');
+  const demoTable = process.argv.includes('--demo-model-table');
 
   // Latest models map, refreshed by price-watch, used by config-scan.
   let latestModels = {};
+
+  // One-shot demo: post the new aggregated model-change table to Discord using
+  // the last real hy3 change (current cost -> 8x older) as the example, labeled
+  // DEMO. Never logs webhook URLs. Exits after delivery.
+  if (demoTable) {
+    delivery.init(stateDir, {
+      dedupTtlMs: 86400000,
+      changelogRetentionMs: (config.changelogRetentionDays || 7) * 24 * 60 * 60 * 1000
+    });
+    const chunks = buildDemoModelTable(stateDir);
+    let first = true;
+    for (const c of chunks) {
+      await delivery.sendToSubscribers('model_change', (first ? '**DEMO** · ' : '') + c);
+      first = false;
+    }
+    await delivery.alert(
+      'info',
+      'Demo model table posted',
+      `DEMO — ${chunks.length} chunk(s) sent to model_change subscribers`,
+      { noChangelog: true }
+    );
+    await shutdown(0);
+  }
 
   async function cycle() {
     delivery.init(stateDir, {
