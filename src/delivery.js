@@ -479,6 +479,18 @@ function configure(deliveryOptions, stateDir) {
   loadSubscribers();
 }
 
+// Allow callers (e.g. the Discord digest builder) to point delivery's
+// module-level STATE_DIR at a specific state dir so windowing/projection math
+// (which reads usage-history.json from STATE_DIR) uses the right location.
+function setStateDir(dir) {
+  if (dir) STATE_DIR = dir;
+  return STATE_DIR;
+}
+
+function getStateDir() {
+  return STATE_DIR;
+}
+
 function ensureConfig() {
   if (!CONFIG) {
     CONFIG = {
@@ -930,5 +942,9 @@ module.exports = {
   deliverToSubscriber,
   buildSubscriberDelivery,
   sendToSubscribers,
-  setSubscribers
+  setSubscribers,
+  setStateDir,
+  getStateDir,
+  readUsageHistory,
+  windowInfo
 };

@@ -8,13 +8,20 @@ const delivery = require('./delivery');
 // chunk at 1900 to leave headroom for the JSON envelope / username.
 const CHUNK_MAX = 1900;
 
-// Header line distinguishing the periodic digest from a single alert.
-const DIGEST_HEADER = 'Daily digest — OpenCode Model Monitor (auto-posted)';
+// 7-day retention window for "what changed" events (mirrors delivery's
+// changelogRetentionMs default so the digest matches the report's window).
+const CHANGELOG_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Max bullets / events surfaced in the digest before we say "+N more".
+const MAX_EVENTS = 5;
+
+// Windows we surface by default in the quota section.
+const WINDOWS = ['rolling', 'weekly', 'monthly'];
 
 // Best-effort read of report.json from a state dir. Returns null on any miss.
 function readReport(stateDir) {
   try {
-    const p = path.join(stateDir || delivery.STATE_DIR || path.join(__dirname, '..', 'state'), 'report.json');
+    const p = path.join(stateDir || delivery.getStateDir() || path.join(__dirname, '..', 'state'), 'report.json');
     return JSON.parse(fs.readFileSync(p, 'utf8'));
   } catch (_) {
     return null;
@@ -50,18 +57,241 @@ function chunkText(text, max) {
   return chunks;
 }
 
-// Build 1-3 Discord-safe chunks (each <=1900 chars) from the current report:
-// a digest header + the human-readable Markdown report (which already contains
-// the generated timestamp, models tracked, 7-day quota movement + events, and
-// upcoming resets/projections). Split on newlines to fit; never exceed the cap.
+// --- presentation helpers --------------------------------------------------
+
+// Human date only (e.g. "Sep 8"), UTC so it never shifts across timezones.
+function humanDate(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '?';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+// Trim a number for chat: integers stay ints, floats drop trailing zeros.
+function fmtNum(x) {
+  if (x == null || isNaN(x)) return '?';
+  if (Number.isInteger(x)) return String(x);
+  return String(parseFloat(Number(x).toFixed(4)));
+}
+
+// Truncate to ~n chars with an ellipsis so a bullet stays one scannable line.
+function truncate(s, n) {
+  s = String(s == null ? '' : s);
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+}
+
+// Strip a trailing URL (and the " — " before it) from a message.
+function stripUrl(s) {
+  return String(s || '')
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/\s*—\s*$/, '')
+    .replace(/\s*\(?\s*$/, '')
+    .trim();
+}
+
+// Turn one changelog event into a single, scannable bullet line:
+//   "• hy3 cost 0.0175→0.14 (8x) — model_change"
+//   "• Usage fetch failed: fetch failed — warning"
+function describeEvent(ev) {
+  const lvl = ev.level || '?';
+  let desc;
+  if (lvl === 'model_change') {
+    const m = String(ev.message || '');
+    const cost = m.match(/Cost changed for (\S+):\s*(\{[^}]*\})\s*->\s*(\{[^}]*\})/);
+    if (cost) {
+      const model = cost[1];
+      try {
+        const oldC = JSON.parse(cost[2]);
+        const newC = JSON.parse(cost[3]);
+        const o = oldC.input;
+        const n = newC.input;
+        let multStr = '';
+        if (o && n && o !== n) {
+          const ratio = n / o;
+          multStr = ratio >= 1 ? ` (${Math.round(ratio)}x)` : ` (${Math.round(1 / ratio)}x lower)`;
+        }
+        desc = `${model} cost ${fmtNum(o)}→${fmtNum(n)}${multStr}`;
+      } catch (_) {
+        desc = `${model} cost changed`;
+      }
+    } else {
+      // Feed/docs update — summarize the title, drop the commit URL.
+      desc = stripUrl(m) || ev.title || 'model change';
+    }
+  } else {
+    desc = ev.title || '';
+    if (ev.message && ev.message !== ev.title) {
+      desc += ': ' + ev.message;
+    }
+  }
+  return `• ${truncate(desc, 120)} — ${lvl}`;
+}
+
+// Read recent changelog events (7-day window), newest first, capped to last 20
+// for parity with the rendered report. Returns an array of {ts,level,title,message}.
+function getEvents(stateDir, now) {
+  now = now || Date.now();
+  const cutoff = now - CHANGELOG_RETENTION_MS;
+  let arr = [];
+  try {
+    const raw = fs.readFileSync(path.join(stateDir, 'changelog.json'), 'utf8');
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      arr = parsed.filter((e) => (e.ts ? Date.parse(e.ts) : 0) >= cutoff);
+    }
+  } catch (_) {
+    return [];
+  }
+  return arr.slice(-20).reverse();
+}
+
+// Format a 7-day delta as "(Δ +1/7d)" / "(Δ -3/7d)" / "" when unknown.
+function deltaStr(delta) {
+  if (delta == null) return '';
+  const sign = delta > 0 ? '+' : '';
+  return ` (Δ ${sign}${delta}/7d)`;
+}
+
+// Project the ~80% warn date for a window, or null when stable/unknown.
+function warnDateFor(history, win, now) {
+  const wi = delivery.windowInfo(history, win, now);
+  if (!history.length || !wi) return null;
+  const { current, delta, daysElapsed } = wi;
+  const rate = daysElapsed > 0 ? delta / daysElapsed : 0;
+  if (rate <= 0) return null;
+  if (current >= 80) return 'at/above warn';
+  const daysToWarn = (80 - current) / rate;
+  return humanDate(new Date(now + daysToWarn * 864e5).toISOString());
+}
+
+// Build 1-3 Discord-safe chunks (each <=1900 chars) from the current report,
+// in a scannable, chat-first layout:
+//
+//   Chunk 1 — TL;DR + "What changed" (always present)
+//   Chunk 2 — Quota detail lines (only when there is usage data)
+//   Chunk 3 — Upcoming / actions (only when there is a projection to surface)
+//
+// No raw JSON, no full timestamps, no 304/ETag jargon — human dates only.
 function buildDigestChunks(report, opts) {
   opts = opts || {};
   const max = opts.chunkMax || CHUNK_MAX;
-  const md = delivery.renderMarkdown(report || {});
-  const full = DIGEST_HEADER + '\n' + md;
-  const chunks = chunkText(full, max);
-  // Cap at 3 posts per the spec; each piece is already <= max so even the
-  // (unlikely) 3rd chunk stays under Discord's 2000-char POST limit.
+  const stateDir = opts.stateDir || delivery.getStateDir() || path.join(__dirname, '..', 'state');
+  if (opts.stateDir) delivery.setStateDir(opts.stateDir);
+
+  const rep = report || {};
+  const now = Date.now();
+
+  // --- gather data ---
+  const pricing = rep.pricing || {};
+  const models = pricing.models || {};
+  const modelCount =
+    pricing.modelCount != null ? pricing.modelCount : Object.keys(models).length;
+
+  const usage = rep.usage || {};
+  const usageWin = usage.usage ? usage.usage : usage;
+  const wins = WINDOWS.filter((w) => usageWin[w]);
+
+  let history = [];
+  try {
+    history = delivery.readUsageHistory();
+  } catch (_) {
+    history = [];
+  }
+  const deltaFor = (w) => {
+    const wi = delivery.windowInfo(history, w, now);
+    return wi && wi.delta != null ? wi.delta : null;
+  };
+
+  const events = getEvents(stateDir, now);
+  const eventCount = events.length;
+
+  // Headline window for the TL;DR is monthly (the budget users care about),
+  // falling back to the last available window. Projections (warn dates) are only
+  // meaningful for the headline window — rolling/weekly reset too often for a
+  // linear projection to be useful, so we never surface them as "warn ~date".
+  const headlineWin = wins.includes('monthly') ? 'monthly' : wins[wins.length - 1];
+  const headline = usageWin[headlineWin] || null;
+  const headlinePct = headline && headline.percent != null ? headline.percent : null;
+  const headlineDelta = headline ? deltaFor(headlineWin) : null;
+
+  // "next reset" — prefer the monthly reset (matches the headline window);
+  // otherwise the soonest upcoming reset among the windows.
+  let nextResetIso = headline && headline.resetsAt ? headline.resetsAt : null;
+  if (!nextResetIso) {
+    let soonest = null;
+    for (const w of wins) {
+      const r = usageWin[w] && usageWin[w].resetsAt;
+      if (r) {
+        const t = Date.parse(r);
+        if (!isNaN(t) && t >= now - 864e5 && (!soonest || t < soonest)) soonest = t;
+      }
+    }
+    nextResetIso = soonest ? new Date(soonest).toISOString() : null;
+  }
+
+  // --- status line ---
+  const quiet = eventCount === 0;
+  const statusEmoji = quiet ? '🟢' : '🔴';
+  const statusText = quiet ? 'All quiet' : `${eventCount} changes`;
+
+  const tldrParts = [`**Monitor** ${statusEmoji} ${statusText}`];
+  if (modelCount != null) tldrParts.push(`${modelCount} models`);
+  if (headlinePct != null) {
+    tldrParts.push(`monthly ${headlinePct}%${deltaStr(headlineDelta)}`);
+  }
+  if (nextResetIso) tldrParts.push(`next reset ${humanDate(nextResetIso)}`);
+  const tldr = tldrParts.join(' · ');
+
+  // --- chunk 1: TL;DR + what changed ---
+  const c1 = [tldr, ''];
+  if (quiet) {
+    c1.push('_No discrete changes — quota only._');
+  } else {
+    c1.push('**What changed**');
+    const shown = events.slice(0, MAX_EVENTS);
+    for (const ev of shown) c1.push(describeEvent(ev));
+    if (eventCount > MAX_EVENTS) c1.push(`• +${eventCount - MAX_EVENTS} more — see changelog`);
+  }
+  const chunk1 = c1.join('\n');
+
+  // --- chunk 2: quota detail (only if we have usage data) ---
+  let chunk2 = '';
+  if (usage.status !== 'unknown' && wins.length) {
+    const q = ['**Quota**'];
+    for (const w of wins) {
+      const wi = usageWin[w];
+      const pct = wi.percent != null ? wi.percent + '%' : '?';
+      const reset = wi.resetsAt ? ` → resets ${humanDate(wi.resetsAt)}` : '';
+      // Warn projection only for the headline window (see note above).
+      const warn = w === headlineWin ? warnDateFor(history, w, now) : null;
+      const warnStr = warn && warn !== 'at/above warn' ? ` · warn ~${warn}` : '';
+      q.push(`• ${w} ${pct}${deltaStr(deltaFor(w))}${reset}${warnStr}`);
+    }
+    chunk2 = q.join('\n');
+  }
+
+  // --- chunk 3: upcoming / actions (only the headline window) ---
+  let chunk3 = '';
+  const warn = warnDateFor(history, headlineWin, now);
+  const actions = [];
+  if (warn === 'at/above warn') actions.push(`• ${headlineWin} already at/above warn threshold`);
+  else if (warn) actions.push(`• ${headlineWin} warn projected ${warn} — consider throttle`);
+  if (actions.length) {
+    chunk3 = ['**Upcoming / actions**', ...actions].join('\n');
+  }
+
+  // Assemble up to 3 chunks, splitting any over-long piece as a safety net.
+  const raw = [chunk1];
+  if (chunk2) raw.push(chunk2);
+  if (chunk3) raw.push(chunk3);
+
+  const chunks = [];
+  for (const piece of raw) {
+    for (const c of chunkText(piece, max)) {
+      chunks.push(c);
+      if (chunks.length >= 3) break;
+    }
+    if (chunks.length >= 3) break;
+  }
   return chunks.slice(0, 3);
 }
 
@@ -85,4 +315,4 @@ async function postDigest(opts) {
   return chunks;
 }
 
-module.exports = { buildDigestChunks, postDigest, chunkText, CHUNK_MAX };
+module.exports = { buildDigestChunks, postDigest, chunkText, readReport, CHUNK_MAX };
