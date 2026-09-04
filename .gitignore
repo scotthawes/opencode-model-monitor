@@ -9,3 +9,6 @@ node_modules/
 
 # User config (may contain local paths/secrets — do not commit)
 config.json
+
+# Subscriber list (may contain webhook URLs / env-var names — do not commit)
+subscribers.json

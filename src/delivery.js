@@ -179,7 +179,78 @@ function init(stateDir, opts) {
   if (opts && typeof opts.dedupTtlMs === 'number') dedupTtlMs = opts.dedupTtlMs;
   if (opts && typeof opts.changelogRetentionMs === 'number') changelogRetentionMs = opts.changelogRetentionMs;
   loadDedup();
+  loadSubscribers();
   backfillFromAlertsLog(stateDir || STATE_DIR);
+}
+
+// --- Persistent subscriber fan-out ----------------------------------------
+//
+// subscribers.json (repo root) is a best-effort, gitignored list of endpoints
+// that should each receive alerts when their `levels` filter includes the alert
+// level. Each entry is one of:
+//   { name, webhookUrl, levels: ["model_change","warning","critical"] }
+//   { name, webhookEnv: "SOME_ENV_VAR", levels: [...] }   // secret via env
+// When the file is absent or invalid, SUBSCRIBERS stays empty and the monitor
+// behaves exactly as before (no fan-out). The single CONFIG.webhook path is
+// unaffected, so the legacy MODEL_MONITOR_WEBHOOK flow still works.
+
+// Default per-subscriber POST timeout (10s) so a hung endpoint can't stall
+// the tracked delivery promise indefinitely.
+const SUBSCRIBER_TIMEOUT_MS = 10000;
+
+let SUBSCRIBERS = [];
+
+function subscribersPath() {
+  // Mirror config.json placement: repo root (parent of src/).
+  return path.join(__dirname, '..', 'subscribers.json');
+}
+
+// Best-effort load of subscribers.json. Never throws; on any failure the
+// subscriber list is left empty so the monitor continues normally.
+function loadSubscribers() {
+  const p = subscribersPath();
+  try {
+    if (!fs.existsSync(p)) {
+      SUBSCRIBERS = [];
+      return;
+    }
+    const raw = fs.readFileSync(p, 'utf8');
+    const arr = JSON.parse(raw);
+    SUBSCRIBERS = Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    SUBSCRIBERS = [];
+    try {
+      fs.appendFileSync(
+        path.join(STATE_DIR, 'alerts.log'),
+        `[${ts()}] WARNING | Subscriber config invalid — fan-out disabled | ${e && e.message ? e.message : e}\n`
+      );
+    } catch (_) {}
+  }
+}
+
+// Deliver a single payload to one subscriber endpoint. Best-effort: any failure
+// is logged to alerts.log as a WARNING; this function never rejects.
+async function deliverToSubscriber(sub, url, payload) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SUBSCRIBER_TIMEOUT_MS);
+  try {
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+  } catch (e) {
+    try {
+      const name = (sub && sub.name) || 'unknown';
+      fs.appendFileSync(
+        path.join(STATE_DIR, 'alerts.log'),
+        `[${ts()}] WARNING | Subscriber delivery failed (${name}) | ${e && e.message ? e.message : e}\n`
+      );
+    } catch (_) {}
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // Wait for all in-flight delivery promises to settle. Safe to call multiple
@@ -200,6 +271,8 @@ function configure(deliveryOptions, stateDir) {
     webhook: null
   };
   if (stateDir) STATE_DIR = stateDir;
+  // Best-effort: a missing/invalid subscribers.json simply means no fan-out.
+  loadSubscribers();
 }
 
 function ensureConfig() {
@@ -318,6 +391,25 @@ async function alert(level, title, message, opts) {
         }
       })()
     );
+  }
+
+  // Persistent subscriber fan-out. For every subscriber whose `levels` filter
+  // includes this alert's level, POST { text: "[LEVEL] title — message" } to
+  // its webhook URL (resolved directly, or via a webhookEnv env var so the
+  // secret never lives in subscribers.json). Fully best-effort: timeouts and
+  // other failures are logged as WARNING and never thrown, and a malformed
+  // entry is skipped so one bad subscriber can't break alert delivery.
+  for (const sub of SUBSCRIBERS) {
+    try {
+      if (!sub || !Array.isArray(sub.levels) || !sub.levels.includes(level)) continue;
+      let url = sub.webhookUrl;
+      if (!url && sub.webhookEnv) url = process.env[sub.webhookEnv];
+      if (!url) continue; // nothing resolvable to deliver to
+      const payload = { text: `[${String(level).toUpperCase()}] ${title} — ${message}` };
+      track(deliverToSubscriber(sub, url, payload));
+    } catch (_) {
+      // A structurally broken entry must not crash the alert path.
+    }
   }
 }
 
@@ -580,5 +672,7 @@ module.exports = {
   writeReport,
   renderMarkdown,
   init,
-  setKnownModelIds
+  setKnownModelIds,
+  loadSubscribers,
+  deliverToSubscriber
 };

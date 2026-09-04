@@ -191,6 +191,45 @@ can optionally enable richer delivery channels:
   ```
   A failing `POST` is caught and logged as a best-effort miss — it never throws.
 
+### Subscribers (multiple destinations + per-subscriber filtering)
+
+The single `webhook` channel above is one destination. To fan **every** alert
+out to multiple endpoints — each receiving only the levels it cares about —
+create a gitignored `subscribers.json` (copy [`subscribers.example.json`](subscribers.example.json))
+next to `config.json`:
+
+```json
+[
+  { "name": "team-slack",
+    "webhookUrl": "https://hooks.slack.com/services/XXX/YYY/ZZZ",
+    "levels": ["model_change", "warning", "critical"] },
+  { "name": "team-discord",
+    "webhookEnv": "MODEL_MONITOR_DISCORD_WEBHOOK",
+    "levels": ["model_change", "warning", "critical"] }
+]
+```
+
+- `name` — free-text label used in failure logs.
+- `webhookUrl` **or** `webhookEnv` — the destination. Use `webhookEnv` to point
+  at an environment variable (e.g. `MODEL_MONITOR_DISCORD_WEBHOOK`) so the
+  secret never lives in the file. The file is gitignored regardless.
+- `levels` — subset of `info | model_change | warning | critical`. An alert is
+  delivered to a subscriber only if its level is in this list (so `info`
+  heartbeat cycles are excluded unless you opt in).
+
+On each alert the monitor `POST`s
+`{ "text": "[MODEL_CHANGE] title — message" }` (level uppercased) to every
+matching subscriber. Delivery is fully best-effort: a ~10s per-subscriber
+timeout, failures are logged to `state/alerts.log` as `WARNING | Subscriber
+delivery failed (name)`, and a bad subscriber never throws or stops the
+monitor. The legacy `MODEL_MONITOR_WEBHOOK` single-path still works exactly as
+before when no `subscribers.json` is present.
+
+**Add a subscriber (Slack or Discord):**
+1. Copy `subscribers.example.json` → `subscribers.json`.
+2. Add `{ "name": "...", "webhookUrl": "<Slack/Discord incoming-webhook URL>", "levels": ["model_change","warning","critical"] }` (or use `webhookEnv` to read the URL from an env var).
+3. Test instantly with a one-shot run: `MODEL_MONITOR_WEBHOOK= URL node src/monitor.js --once` — or just watch `state/alerts.log` for your subscriber name on the next alert.
+
 A ready-to-edit template lives at [`config.example.json`](config.example.json).
 
 ## Run continuously
