@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { execFile } = require('child_process');
 
 // Delivery channels. Configured once at startup with the user's delivery
 // options + the state directory. All functions are best-effort and never throw.
@@ -304,6 +305,78 @@ async function flush() {
   await Promise.allSettled([...inFlight]);
 }
 
+// --- Desktop notification helpers -----------------------------------------
+//
+// Best-effort, never throw. We must NEVER let a desktop backend hang or be
+// silently swallowed: any failure is logged to alerts.log as a WARNING so the
+// gap is visible, and a 3s timeout guard bounds node-notifier on platforms
+// where its bundled binary can dangle (e.g. terminal-notifier on macOS 26).
+
+// Escape a string for embedding inside an AppleScript double-quoted literal:
+// backslash first, then double-quote, and truncate to keep the payload sane.
+function escapeAppleScript(str) {
+  return String(str)
+    .slice(0, 500)
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"');
+}
+
+// Native macOS notifications via osascript (no bundled binary). Resolves with
+// null on success or an Error on failure — never rejects.
+function notifyViaOsascript(notifyTitle, notifyMessage, subtitle) {
+  return new Promise((resolve) => {
+    const script =
+      `display notification "${escapeAppleScript(notifyMessage)}` +
+      `" with title "${escapeAppleScript(notifyTitle)}` +
+      `" subtitle "${escapeAppleScript(subtitle)}"`;
+    execFile('osascript', ['-e', script], { timeout: 3000 }, (err) => {
+      resolve(err || null);
+    });
+  });
+}
+
+// node-notifier path with callback + 3s timeout race. The earlier silent
+// implementation called notify() without a callback, so a backend that never
+// invokes the callback (terminal-notifier hang) left the promise unsettled
+// forever. We now always race against a timeout and report the outcome.
+function notifyViaNotifier(notifyTitle, notifyMessage) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(err || null);
+    };
+    const timer = setTimeout(() => finish(new Error('timeout after 3000ms')), 3000);
+    let notifier;
+    try {
+      notifier = require('node-notifier');
+    } catch (e) {
+      return finish(e);
+    }
+    try {
+      notifier.notify({ title: notifyTitle, message: notifyMessage }, (err) => {
+        finish(err || null);
+      });
+    } catch (e) {
+      finish(e);
+    }
+  });
+}
+
+// Best-effort WARNING line to alerts.log so desktop delivery gaps are visible.
+function logDesktopWarning(detail) {
+  try {
+    fs.appendFileSync(
+      path.join(STATE_DIR, 'alerts.log'),
+      `[${ts()}] WARNING | Desktop delivery failed (${detail})\n`
+    );
+  } catch (_) {
+    // best effort
+  }
+}
+
 let CONFIG = null;
 let STATE_DIR = path.join(__dirname, '..', 'state');
 
@@ -404,19 +477,31 @@ async function alert(level, title, message, opts) {
   }
 
   if (CONFIG.desktop) {
-    // Tracked in inFlight so flush() awaits it. Wrapped in a promise even
-    // though node-notifier is synchronous, to keep the tracking uniform.
+    // Tracked in inFlight so flush() awaits it. Best-effort, never throws.
     track(
       (async () => {
-        try {
-          // Lazy-required so the default run works without node-notifier installed.
-          const notifier = require('node-notifier');
-          notifier.notify({
-            title: `OpenCode Monitor — ${level}`,
-            message: `${title}\n${message}`
-          });
-        } catch (_) {
-          // node-notifier not installed or failed; ignore.
+        const notifyTitle = `OpenCode Monitor — ${level}`;
+        const notifyMessage = `${title}\n${message}`;
+        if (process.platform === 'darwin') {
+          // Prefer native osascript on macOS: no bundled/unsigned binary, and
+          // avoids the terminal-notifier 1.7.2 hang on macOS 26 (callback never
+          // fires, child dangles — used to be silently swallowed). Fall back to
+          // node-notifier only if osascript fails.
+          const osaErr = await notifyViaOsascript(notifyTitle, notifyMessage, title);
+          if (osaErr) {
+            logDesktopWarning(`osascript failed: ${osaErr.message || osaErr}`);
+            const nnErr = await notifyViaNotifier(notifyTitle, notifyMessage);
+            if (nnErr) {
+              logDesktopWarning(`node-notifier fallback failed: ${nnErr.message || nnErr}`);
+            }
+          }
+        } else {
+          // Linux/other: node-notifier with a callback + timeout guard so a
+          // hung backend can never block delivery (or the process) silently.
+          const nnErr = await notifyViaNotifier(notifyTitle, notifyMessage);
+          if (nnErr) {
+            logDesktopWarning(`node-notifier failed: ${nnErr.message || nnErr}`);
+          }
         }
       })()
     );
