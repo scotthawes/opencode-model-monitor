@@ -70,6 +70,18 @@ async function runPriceWatch(stateDir) {
 
   const og = (data && data['opencode-go']) || null;
   const modelsRaw = (og && og.models) || {};
+  if (!modelsRaw || typeof modelsRaw !== 'object' || Object.keys(modelsRaw).length === 0) {
+    // Live data shape is wrong (opencode-go missing, or models empty) despite a
+    // 200-OK. Treat as a fetch failure: alert + no diff. Critically, do NOT
+    // overwrite the prior good snapshot, so we never report every model as
+    // removed on a transient upstream glitch.
+    delivery.alert(
+      'warning',
+      'Pricing data empty',
+      'opencode-go models missing/empty on 200-OK; treating as fetch-failed (no diff kept)'
+    );
+    return { status: 'unknown', error: 'empty live data', models: readSnapshot(snapFile), changes: [] };
+  }
   const modelsMap = {};
   for (const id of Object.keys(modelsRaw)) {
     const m = modelsRaw[id] || {};
@@ -77,38 +89,60 @@ async function runPriceWatch(stateDir) {
   }
 
   let prev = {};
+  let prevValid = true;
+  let snapExisted = false;
   try {
-    prev = JSON.parse(fs.readFileSync(snapFile, 'utf8')) || {};
-  } catch (_) {}
+    const raw = fs.readFileSync(snapFile, 'utf8');
+    snapExisted = true;
+    const parsed = JSON.parse(raw);
+    if (isValidSnapshot(parsed)) prev = parsed;
+    else prevValid = false; // file exists but shape is unrecognized
+  } catch (_) {
+    // Missing file → first run (empty baseline, normal). A present but corrupt
+    // JSON file → shape unrecognized, so we must NOT blindly trust it.
+    prevValid = !snapExisted;
+    prev = {};
+  }
 
-  const prevIds = new Set(Object.keys(prev));
+  const prevIds = prevValid ? new Set(Object.keys(prev)) : new Set();
   const newIds = new Set(Object.keys(modelsMap));
   const changes = [];
   // Structured descriptors for the aggregated Discord model-change table.
   const modelChanges = [];
 
-  for (const id of newIds) {
-    if (!prevIds.has(id)) {
-      changes.push(`Added model: ${id}`);
-      modelChanges.push({ subtype: 'added', model: id, cost: (modelsMap[id] || {}).cost || null });
-    } else {
-      const a = prev[id] || {};
-      const b = modelsMap[id] || {};
-      if (JSON.stringify(a.cost) !== JSON.stringify(b.cost)) {
-        changes.push(`Cost changed for ${id}: ${JSON.stringify(a.cost)} -> ${JSON.stringify(b.cost)}`);
-        modelChanges.push({ subtype: 'cost', model: id, oldCost: a.cost || null, newCost: b.cost || null });
-      }
-      if (JSON.stringify(a.tiers) !== JSON.stringify(b.tiers)) {
-        changes.push(`Tiers changed for ${id}`);
-        modelChanges.push({ subtype: 'tiers', model: id });
+  if (prevValid) {
+    for (const id of newIds) {
+      if (!prevIds.has(id)) {
+        changes.push(`Added model: ${id}`);
+        modelChanges.push({ subtype: 'added', model: id, cost: (modelsMap[id] || {}).cost || null });
+      } else {
+        const a = prev[id] || {};
+        const b = modelsMap[id] || {};
+        if (JSON.stringify(a.cost) !== JSON.stringify(b.cost)) {
+          changes.push(`Cost changed for ${id}: ${JSON.stringify(a.cost)} -> ${JSON.stringify(b.cost)}`);
+          modelChanges.push({ subtype: 'cost', model: id, oldCost: a.cost || null, newCost: b.cost || null });
+        }
+        if (JSON.stringify(a.tiers) !== JSON.stringify(b.tiers)) {
+          changes.push(`Tiers changed for ${id}`);
+          modelChanges.push({ subtype: 'tiers', model: id });
+        }
       }
     }
-  }
-  for (const id of prevIds) {
-    if (!newIds.has(id)) {
-      changes.push(`Removed model: ${id}`);
-      modelChanges.push({ subtype: 'removed', model: id });
+    for (const id of prevIds) {
+      if (!newIds.has(id)) {
+        changes.push(`Removed model: ${id}`);
+        modelChanges.push({ subtype: 'removed', model: id });
+      }
     }
+  } else {
+    // Corrupt/placeholder snapshot: treat as no-diff so we never report a flood
+    // of added/removed models. The freshly fetched snapshot is still written
+    // below as the new baseline for subsequent runs.
+    delivery.alert(
+      'warning',
+      'Pricing snapshot invalid',
+      'previous snapshot shape unrecognized; treating as no-diff (no removals reported)'
+    );
   }
 
   try {
@@ -138,6 +172,21 @@ function readSnapshot(snapFile) {
   } catch (_) {
     return {};
   }
+}
+
+// A pricing snapshot is "valid" only if it is a non-array object containing at
+// least one model-like entry (an object carrying `cost`/`tiers`). This lets us
+// recognize a corrupt or placeholder snapshot (e.g. the `{ status: 'unknown',
+// error: '...' }` written when a fetch fails) and treat it as no-diff instead of
+// reporting every model as added/removed.
+function isValidSnapshot(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return false;
+  const keys = Object.keys(obj);
+  if (keys.length < 1) return false;
+  return keys.some((k) => {
+    const v = obj[k];
+    return v && typeof v === 'object' && !Array.isArray(v) && (('cost' in v) || ('tiers' in v));
+  });
 }
 
 module.exports = { runPriceWatch };
