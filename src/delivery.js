@@ -322,13 +322,20 @@ function escapeAppleScript(str) {
 }
 
 // Native macOS notifications via osascript (no bundled binary). Resolves with
-// null on success or an Error on failure — never rejects.
-function notifyViaOsascript(notifyTitle, notifyMessage, subtitle) {
+// null on success or an Error on failure — never rejects. `soundName` (optional)
+// plays an alert sound so popups are audible even when the banner auto-dismisses
+// (the user can make them sticky via System Settings — see README).
+function notifyViaOsascript(notifyTitle, notifyMessage, subtitle, soundName) {
   return new Promise((resolve) => {
-    const script =
+    let script =
       `display notification "${escapeAppleScript(notifyMessage)}` +
       `" with title "${escapeAppleScript(notifyTitle)}` +
       `" subtitle "${escapeAppleScript(subtitle)}"`;
+    if (soundName) {
+      // Sound names are a fixed macOS vocabulary (constants we control, not
+      // user input) but escape defensively anyway.
+      script += ` sound name "${escapeAppleScript(soundName)}"`;
+    }
     execFile('osascript', ['-e', script], { timeout: 3000 }, (err) => {
       resolve(err || null);
     });
@@ -487,7 +494,29 @@ async function alert(level, title, message, opts) {
           // avoids the terminal-notifier 1.7.2 hang on macOS 26 (callback never
           // fires, child dangles — used to be silently swallowed). Fall back to
           // node-notifier only if osascript fails.
-          const osaErr = await notifyViaOsascript(notifyTitle, notifyMessage, title);
+          //
+          // Prominence: play a sound (louder per severity) so banners that
+          // auto-dismiss are still audible, and for the important levels put the
+          // level + timestamp in the subtitle so they stand out when grouped in
+          // Notification Center. To make them STICKY (Alert style, no
+          // auto-dismiss) the user sets System Settings → Notifications →
+          // Terminal (or Script Editor) → Style: Alerts + Allow sound + Show on
+          // Lock Screen (see README). The monitor cannot set the style itself.
+          const soundByLevel = {
+            info: 'Glass',
+            model_change: 'Glass',
+            warning: 'Ping',
+            critical: 'Sosumi'
+          };
+          // Default subtitle = alert title (info). For the levels worth
+          // noticing, lead the subtitle with the LEVEL + time so it groups
+          // prominently in Notification Center and is glanceable.
+          let notifySubtitle = title;
+          if (level === 'warning' || level === 'critical' || level === 'model_change') {
+            notifySubtitle = `${String(level).toUpperCase()} · ${new Date().toLocaleString()}`;
+          }
+          const soundName = soundByLevel[level] || 'Glass';
+          const osaErr = await notifyViaOsascript(notifyTitle, notifyMessage, notifySubtitle, soundName);
           if (osaErr) {
             logDesktopWarning(`osascript failed: ${osaErr.message || osaErr}`);
             const nnErr = await notifyViaNotifier(notifyTitle, notifyMessage);
