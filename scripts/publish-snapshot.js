@@ -260,20 +260,23 @@ Generated: ${generatedAt}
 
 ## Page sections (index.html)
 
-1. **Price graph** — output (or input) $/1M over time, one line per model. Defaults
-   to the top-10 movers; type a model id/name to add any model. Coloring reflects
-   the 7-day price direction (green = down, red = up, grey = flat).
-2. **Model table** — current output/input $/1M with the 7-day delta (% / × / $) per
+1. **Leaderboard** — proper table: # / Model / Eff $/req / Cap / Req-mo, zebra rows,
+   cheapest-effective first (green). The fastest read, shown at the top.
+2. **Price graph** — output (or input) $/1M over time, one line per model. Defaults
+   to the top-10 movers; type a model id/name to add any of the tracked models.
+   X axis is daily ("Sep 5"), capped at ~320px, legend at the bottom. Coloring
+   reflects the 7-day price direction (green = down, red = up, grey = flat).
+3. **Model table** — current output/input $/1M with the 7-day delta (% / × / $) per
    model, rows colored by direction. No per-model usage is published, so usage
    coloring is intentionally N/A (price-only).
-3. **Recent feed** — last 8-10 summarized price-change one-liners with change
+4. **Recent feed** — last 8-10 summarized price-change one-liners with change
    metric, plus a link to the full public log (\`changelog.json\`).
 
 ## What is published
 
 | File | Contents |
 | --- | --- |
-| \`index.html\` | Redesigned public page: price graph (Chart.js) + 7-day-colored model table + summarized feed |
+| \`index.html\` | Redesigned public page: leaderboard table (top) + daily price graph (Chart.js) + 7-day-colored model table + summarized feed |
 | \`pricing.json\` | Allowlisted page data: 7-day deltas per model, graph series, top movers, recent feed |
 | \`pricing-snapshot.json\` | Latest public per-model pricing (cost / tiers / meta) |
 | \`history.json\` | Public per-sample pricing history |

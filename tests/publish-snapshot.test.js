@@ -182,6 +182,14 @@ test('buildSnapshot writes pricing.json with 7-day deltas and a redesigned index
   assert.strictEqual(pd.models[0].delta7d.direction, 'up', 'output rose -> up');
   assert.ok(Math.abs(pd.models[0].delta7d.output.pct - 700) < 1, 'output rose ~700%');
 
+  // Daily bucket labels are published (graph X axis is daily, not hourly).
+  assert.ok(Array.isArray(pd.dailyLabels), 'pricing.json carries dailyLabels');
+  assert.ok(pd.dailyLabels.length >= 1, 'has at least one daily label');
+  for (const lbl of pd.dailyLabels) {
+    assert.ok(!lbl.includes(':'), 'daily label has no hours/minutes: ' + lbl);
+  }
+  assert.strictEqual(pd.models[0].dailySeries.length, pd.dailyLabels.length, 'dailySeries aligned to labels');
+
   // index.html: embedded JSON + canvas + full-log link + feed section.
   const html = fs.readFileSync(path.join(outDir, 'index.html'), 'utf8');
   assert.ok(html.includes('<canvas'), 'canvas element for the graph');

@@ -307,6 +307,32 @@ function numOrNull(v) {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
+// --- Daily bucketing (page readability: "Sep 5", not hourly timestamps) -----
+
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+// UTC day-bucket key for a sample timestamp so multiple intra-day samples
+// collapse to a single daily point on the graph X axis.
+function dayKeyOf(ts) {
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return null;
+  return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate());
+}
+
+// Human day label "Sep 5" (no hours/minutes) for the graph X axis.
+function dayLabelOf(key) {
+  const parts = String(key).split('-');
+  if (parts.length !== 3) return key;
+  const m = Number(parts[1]);
+  const d = Number(parts[2]);
+  if (!(m >= 1 && m <= 12)) return key;
+  return MONTH_ABBR[m - 1] + ' ' + d;
+}
+
 // Reduce a changeParts() result to a plain serializable object (or a neutral
 // "no data" object when the comparison is impossible).
 function deltaToObj(parts) {
@@ -366,6 +392,7 @@ function buildPricingData(history, pricingMap, opts) {
     }
   }
 
+  const dayMap = {}; // collect every day bucket that appears in the window
   const models = [];
   for (const id of Object.keys(seriesMap)) {
     const series = seriesMap[id];
@@ -378,6 +405,11 @@ function buildPricingData(history, pricingMap, opts) {
       cache_read: numOrNull(p.cache_read),
       cache_write: numOrNull(p.cache_write)
     }));
+    // Register the day buckets this model contributes.
+    for (const p of graphSeries) {
+      const k = dayKeyOf(p.ts);
+      if (k) dayMap[k] = true;
+    }
     const latest = series[series.length - 1];
     // Reference sample ~7d ago = earliest sample still inside the window.
     let ref = series[0];
@@ -411,6 +443,27 @@ function buildPricingData(history, pricingMap, opts) {
         direction
       },
       series: graphSeries
+    });
+  }
+
+  // Aggregate each model's windowed series to one point per day ("Sep 5"),
+  // aligned to the shared day-bucket axis so every line lines up on X.
+  const days = Object.keys(dayMap).sort();
+  const dailyLabels = days.map(dayLabelOf);
+  for (const m of models) {
+    const byDay = {};
+    for (const p of m.series) {
+      const k = dayKeyOf(p.ts);
+      if (k) byDay[k] = p; // last sample of the day wins
+    }
+    m.dailySeries = days.map((k) => {
+      const p = byDay[k];
+      return {
+        output: p ? numOrNull(p.output) : null,
+        input: p ? numOrNull(p.input) : null,
+        cache_read: p ? numOrNull(p.cache_read) : null,
+        cache_write: p ? numOrNull(p.cache_write) : null
+      };
     });
   }
 
@@ -470,6 +523,7 @@ function buildPricingData(history, pricingMap, opts) {
   return {
     generatedAt: opts.generatedAt || new Date(now).toISOString(),
     windowDays,
+    dailyLabels,
     models,
     topMovers,
     leaderboard,
@@ -530,6 +584,39 @@ function renderPublicModelRows(data) {
     );
   });
   return rows.join('\n');
+}
+
+// Server-render the Leaderboard as a proper, scannable <table> (page readability):
+// columns # / Model / Eff $/req / Cap badge / Req-mo, zebra rows, right-aligned
+// numbers, sticky header. Sorted cheapest-effective first; the effective-cost cell
+// is green (cheap). Cap badge colored by tier. Returns a full <table> string.
+function renderPublicLeaderboardTable(data) {
+  const lb = data.leaderboard || [];
+  if (lb.length === 0) {
+    return '<p class="muted">No models with usable cost data yet.</p>';
+  }
+  const rows = lb
+    .map((r, i) => {
+      const effColor = '#27ae60'; // cheapest first → green
+      const eff = r.effective == null ? '—' : '$' + changeMetric.trimNum(r.effective);
+      const rpm = r.requestsPerMo == null ? '—' : fmtInt(r.requestsPerMo);
+      return (
+        `<tr>` +
+        `<td class="rank">${i + 1}</td>` +
+        `<td class="model"><code>${esc(r.name || r.id)}</code></td>` +
+        `<td class="num mono" style="color:${effColor};font-weight:600">${esc(eff)}/req</td>` +
+        `<td>${fmtCapBadge(r.cap)}</td>` +
+        `<td class="num mono">${esc(rpm)}</td>` +
+        `</tr>`
+      );
+    })
+    .join('\n');
+  return (
+    `<table class="lb">` +
+    `<thead><tr><th>#</th><th>Model</th><th class="num">Eff $/req</th><th>Cap</th><th class="num">Req-mo</th></tr></thead>` +
+    `<tbody>\n${rows}\n    </tbody>` +
+    `</table>`
+  );
 }
 
 // Server-render the Leaderboard section (v0.10.0, #77): top-10 cheapest effective
@@ -597,7 +684,7 @@ function generatePublicPage(history, opts) {
 
   const modelRows = renderPublicModelRows(data);
   const feedItems = renderPublicFeed(data);
-  const leaderboardItems = renderPublicLeaderboard(data);
+  const leaderboardTable = renderPublicLeaderboardTable(data);
   const generatedAt = data.generatedAt;
   const sampleCount = (data.models || []).reduce((n, m) => n + (m.series ? m.series.length : 0), 0);
   const modelCount = data.models.length;
@@ -623,6 +710,15 @@ function generatePublicPage(history, opts) {
   table { border-collapse: collapse; width: 100%; }
   th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid #e2e2e2; vertical-align: top; }
   th { font-size: .8rem; text-transform: uppercase; letter-spacing: .03em; color: #666; }
+  table.lb { margin: .5rem 0 1rem; }
+  table.lb thead th { position: sticky; top: 0; background: #fff; z-index: 1; }
+  table.lb tbody tr:nth-child(even) { background: #f5f5f5; }
+  table.lb td.num, table.lb th.num { text-align: right; }
+  .graph-wrap { position: relative; height: 320px; max-height: 320px; }
+  @media (prefers-color-scheme: dark) {
+    table.lb thead th { background: #161b22; }
+    table.lb tbody tr:nth-child(even) { background: #11161d; }
+  }
   .mono, code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   .mono { white-space: nowrap; }
   .model code { font-weight: 600; }
@@ -640,6 +736,12 @@ function generatePublicPage(history, opts) {
   <p class="sub">Generated ${esc(generatedAt)} · ${sampleCount} sample(s) · ${modelCount} model(s) tracked · ${data.windowDays}-day window</p>
 </header>
 
+<section id="leaderboard">
+  <h2>Cheapest effective cost leaderboard</h2>
+  <p class="note">Ranked by effective cost per request (asc) = list price × (60 / cap). Green = cheapest. See also <code>npm run leaderboard</code>. The fastest read — brought to the top.</p>
+${leaderboardTable}
+</section>
+
 <section id="graph">
   <h2>Output $/1M over time</h2>
   <div class="controls">
@@ -652,8 +754,8 @@ function generatePublicPage(history, opts) {
     <span class="sw" style="background:#27ae60"></span>decreased (7d)
     <span class="sw" style="background:#95a5a6"></span>unchanged (7d)
   </p>
-  <p class="note">Usage color is N/A on this public page (no per-model usage is published) — coloring reflects price change only. Default shows the top-10 movers; type a model id/name above to add it to the graph.</p>
-  <canvas id="priceGraph" height="320" aria-label="Model output price over time"></canvas>
+  <p class="note">Usage color is N/A on this public page (no per-model usage is published) — coloring reflects price change only. Default shows the top-10 movers; type a model id/name above to add any of the ${data.models.length} tracked models to the graph. X axis is daily ("Sep 5"); samples are aggregated to one point per day.</p>
+  <div class="graph-wrap"><canvas id="priceGraph" height="320" aria-label="Model output price over time"></canvas></div>
 </section>
 
 <section id="compare">
@@ -667,14 +769,6 @@ ${modelRows}
     </tbody>
   </table>
   <p class="note">"Cap" is the public usage-cap tier the model sits on ($15 → 4x effective, $30 → 2x, $60 → 1x, $100 → 0.6x). It is published pricing, not your personal usage.</p>
-</section>
-
-<section id="leaderboard">
-  <h2>Cheapest effective cost leaderboard</h2>
-  <p class="note">Ranked by effective cost per request (asc) = list price × (60 / cap). Green = cheapest. See also <code>npm run leaderboard</code>.</p>
-  <ol id="leaderboard-list">
-${leaderboardItems}
-  </ol>
 </section>
 
 <section id="feed">
@@ -697,14 +791,12 @@ ${feedItems}
     if (d === 'down') return '#27ae60';
     return '#95a5a6';
   }
-  // Shared label axis = union of all sample timestamps.
-  var tsSet = {};
-  data.models.forEach(function (m) { (m.series || []).forEach(function (p) { tsSet[p.ts] = 1; }); });
-  var labels = Object.keys(tsSet).sort();
-  function valAt(m, ts, metric) {
-    var p = (m.series || []).filter(function (x) { return x.ts === ts; })[0];
-    if (!p) return null;
-    var v = p[metric];
+  // Shared X axis = daily buckets ("Sep 5"); one point per day per model.
+  var labels = data.dailyLabels || [];
+  function valAt(m, i, metric) {
+    var ds = m.dailySeries;
+    if (!ds || i >= ds.length) return null;
+    var v = ds[i][metric];
     return typeof v === 'number' ? v : null;
   }
   var chart = null;
@@ -712,7 +804,7 @@ ${feedItems}
     var datasets = data.models.map(function (m) {
       return {
         label: m.name || m.id,
-        data: labels.map(function (ts) { return valAt(m, ts, metric); }),
+        data: labels.map(function (_, i) { return valAt(m, i, metric); }),
         borderColor: dirColor(m.delta7d.direction),
         backgroundColor: dirColor(m.delta7d.direction),
         hidden: data.topMovers.indexOf(m.id) === -1,
@@ -726,13 +818,15 @@ ${feedItems}
       type: 'line',
       data: { labels: labels, datasets: datasets },
       options: {
+        responsive: true,
+        maintainAspectRatio: false,
         animation: false,
         interaction: { mode: 'nearest', intersect: false },
         scales: {
-          x: { ticks: { maxRotation: 45, autoSkip: true }, title: { display: true, text: 'sample time' } },
+          x: { ticks: { maxRotation: 45, autoSkip: true, maxTicksLimit: 10 }, title: { display: true, text: 'day' } },
           y: { title: { display: true, text: (metric === 'output' ? 'Output $/1M' : 'Input $/1M') } }
         },
-        plugins: { legend: { labels: { boxWidth: 12, filter: function (item) { return !item.hidden; } } } }
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, filter: function (item) { return !item.hidden; } } } }
       }
     });
   }
