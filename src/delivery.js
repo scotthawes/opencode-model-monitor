@@ -1429,6 +1429,14 @@ function modelChangeLineStr(l) {
     // of each context tier (standard / large-context). Rides in the first chunk.
     return `↳ ${tierLineStr(l.model, l.tiers)}`;
   }
+  if (l.subtype === 'cap') {
+    // v0.10.0, #77: quota/cap move. A downgrade is the user's top priority
+    // ("models moving between caps = more expensive") so it carries ⚠️ and the
+    // "Xx more expensive / cheaper" magnitude. Ranked top among model changes.
+    const tag = l.direction === 'downgraded' ? '⚠️' : '🔼';
+    const moreLess = l.direction === 'downgraded' ? 'more expensive' : 'cheaper';
+    return `${tag} ${l.model} QUOTA ${l.oldCap}→${l.newCap} (${l.factor}x ${moreLess})  ·  ${metaShort(l.meta)}`;
+  }
   return `• ${l.model} ${l.subtype || 'changed'}  ·  ${meta}`;
 }
 
@@ -1445,6 +1453,10 @@ function modelChangeHumanMessage(ch) {
     if (ch.reason === 'removed') return `Free model removed: ${ch.model}`;
     if (ch.reason === 'changed') return `Free model changed: ${ch.model}`;
     return `Free model available: ${ch.model}`;
+  }
+  if (ch.subtype === 'cap') {
+    const moreLess = ch.direction === 'downgraded' ? 'more expensive' : 'cheaper';
+    return `Quota moved for ${ch.model}: $${ch.oldCap} -> $${ch.newCap} (${ch.factor}x ${moreLess})`;
   }
   return `Model changed: ${ch.model}`;
 }

@@ -5,6 +5,7 @@ const path = require('path');
 const delivery = require('./delivery');
 const events = require('./events'); // v0.8.0: event-sourced history (JSONL, #73)
 const changeMetric = require('./change-metric'); // shared Δ% / × / $ formatting
+const usageTable = require('./usage-table'); // effective-price multiplier + seeded caps
 
 const API_URL = 'https://models.opencode.ai/api.json';
 
@@ -186,6 +187,93 @@ function isFreeModel(id, m) {
   return false;
 }
 
+// --- Quota / usage-cap change detection (v0.10.0, #77) -----------------------
+//
+// opencode-go applies a $60 monthly credit. A model whose monthly usage is capped
+// at $15 effectively costs 4x its list price; capped at $100 it costs 0.6x. The
+// caps live in src/usage-table.json (seeded, see scripts/seed-usage-table.js) and
+// the live api.json catalog has NO per-model usage cap — UNLESS it ever grows one,
+// in which case we prefer the live `usage` field. Each cycle we diff the current
+// per-model cap (from the table, or live) against the previously persisted snapshot
+// (state/usage-caps.json) and emit a `model_change` alert on any move.
+//
+// A DOWNGRADE ($60 -> $15) is the user's #1 priority ("models moving between caps =
+// more expensive"): it is surfaced as a prioritized, ⚠️ warning-styled model_change
+// that the Discord table + digest rank top (it is never collapsed into a quiet bucket).
+// Only models ALREADY present in the prior snapshot are alerted, so the very first
+// run after a seed (where the prior snapshot matches the seed) is silent — no flood.
+// Best-effort and fully non-blocking: any failure is swallowed.
+
+const CAP_SNAPSHOT_FILE = 'usage-caps.json';
+
+// Pure: compute the cap-change descriptors between a prior cap map and the current
+// one. `modelsMap` is the price-watch models map (id -> { usage?, meta? }); the cap
+// for each id is the live `usage` field when present, else usage-table.getUsageCap.
+// Returns an array of { subtype:'cap', model, oldCap, newCap, factor, direction, meta }.
+function computeCapChanges(prevCaps, modelsMap) {
+  const changes = [];
+  for (const id of Object.keys(modelsMap || {})) {
+    const entry = modelsMap[id] || {};
+    const cap =
+      entry.usage != null
+        ? entry.usage
+        : usageTable.getUsageCap(id, usageTable.silentLog);
+    if (typeof prevCaps[id] === 'number' && prevCaps[id] !== cap) {
+      const oldCap = prevCaps[id];
+      // "Xx more expensive" = newMultiplier / oldMultiplier = oldCap / newCap.
+      // $60 -> $15 ⇒ 60/15 = 4x more expensive. $60 -> $100 ⇒ 0.6x (cheaper).
+      const factor = oldCap / cap;
+      const direction = cap < oldCap ? 'downgraded' : 'upgraded';
+      changes.push({ subtype: 'cap', model: id, oldCap, newCap: cap, factor, direction, meta: entry.meta || null });
+    }
+  }
+  return changes;
+}
+
+// Read the persisted previous-cycle cap map (best-effort).
+function readPrevCaps(stateDir) {
+  try {
+    const raw = fs.readFileSync(path.join(stateDir, CAP_SNAPSHOT_FILE), 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+// Persist the current cap map for next cycle's diff (best-effort).
+function writeCurrentCaps(stateDir, modelsMap) {
+  try {
+    const next = {};
+    for (const id of Object.keys(modelsMap || {})) {
+      const entry = modelsMap[id] || {};
+      next[id] = entry.usage != null ? entry.usage : usageTable.getUsageCap(id, usageTable.silentLog);
+    }
+    fs.writeFileSync(path.join(stateDir, CAP_SNAPSHOT_FILE), JSON.stringify(next));
+  } catch (_) {
+    // best effort
+  }
+}
+
+// Detect cap moves for this cycle and deliver them as prioritized model_change
+// alerts. Returns the descriptors (for the report's "Changes detected" list).
+// Never throws.
+function detectCapChanges(stateDir, modelsMap) {
+  const prev = readPrevCaps(stateDir);
+  const changes = computeCapChanges(prev, modelsMap);
+  // Always record the current caps first so a future cycle can diff against them,
+  // even when nothing changed this cycle.
+  writeCurrentCaps(stateDir, modelsMap);
+  if (changes.length) {
+    try {
+      delivery.deliverModelChangeTable(changes);
+    } catch (_) {
+      // best effort — never block the rest of the cycle
+    }
+  }
+  return changes;
+}
+
 // Fetches the authoritative pricing catalog for the opencode-go provider,
 // diffs it against the previous snapshot, and alerts on any model change.
 // Returns { status, models, changes, modelCount, error, freeModels }.
@@ -213,18 +301,28 @@ async function runPriceWatch(stateDir) {
     return { status: 'unknown', error: String(e && e.message ? e.message : e), models: readSnapshot(snapFile) };
   }
 
-  if (res.status === 304) {
-    // Catalog unchanged: surface the previously persisted free-model list (it is
-    // already in the snapshot) so the report/Discord views stay accurate every
-    // cycle without re-scanning the unchanged catalog.
-    const snap = readSnapshot(snapFile);
-    return {
-      status: 'unchanged',
-      models: snap,
-      changes: [],
-      freeModels: Array.isArray(snap.freeModels) ? Object.keys(snap.freeModels) : []
-    };
-  }
+   if (res.status === 304) {
+     // Catalog unchanged: surface the previously persisted free-model list (it is
+     // already in the snapshot) so the report/Discord views stay accurate every
+     // cycle without re-scanning the unchanged catalog.
+     const snap = readSnapshot(snapFile);
+     // Even on a 304, a re-seeded usage-table.json may have changed a model's cap,
+     // so still diff caps (best-effort, silent on the common no-change case).
+     const snapModels = {};
+     for (const id of Object.keys(snap || {})) {
+       if (id === 'freeModels') continue;
+       const e = snap[id] || {};
+       snapModels[id] = { cost: e.cost || null, tiers: e.tiers || null, meta: e.meta || null, usage: null };
+     }
+     const capChanges = detectCapChanges(stateDir, snapModels);
+     return {
+       status: 'unchanged',
+       models: snap,
+       changes: capChanges.map(capChangeText),
+       capChanges,
+       freeModels: Array.isArray(snap.freeModels) ? Object.keys(snap.freeModels) : []
+     };
+   }
 
   if (!res.ok) {
     delivery.alert('warning', `Pricing fetch HTTP ${res.status}`, API_URL, {
@@ -266,7 +364,14 @@ async function runPriceWatch(stateDir) {
     const m = modelsRaw[id] || {};
     // `meta` is additive: it rides along in the snapshot + report/Discord views
     // but is NEVER part of the cost/tiers diff below, so existing alerts stay intact.
-    modelsMap[id] = { cost: m.cost || null, tiers: m.tiers || null, meta: extractModelMeta(m) };
+    // `usage` (if api.json EVER carries a per-model usage-cap field) is the LIVE
+    // cap; detectCapChanges prefers it over the seeded usage-table.json cap.
+    modelsMap[id] = {
+      cost: m.cost || null,
+      tiers: m.tiers || null,
+      meta: extractModelMeta(m),
+      usage: typeof m.usage === 'number' && isFinite(m.usage) && m.usage > 0 ? m.usage : null
+    };
   }
 
   // --- Zen (opencode) free-model detection (P1-2, #51) -----------------------
@@ -430,6 +535,16 @@ async function runPriceWatch(stateDir) {
     modelChanges.push(fc);
   }
 
+  // --- Quota / usage-cap change detection (v0.10.0, #77) -----------------------
+  // Diff each model's cap (seeded usage-table / live api.json `usage`) against the
+  // persisted previous snapshot. A downgrade ($60 -> $15) is the user's #1 priority
+  // ("models moving between caps = more expensive") and is delivered as a prioritized,
+  // ⚠️ model_change alert that the Discord table + digest rank top. detection is
+  // best-effort and never blocks the rest of the cycle. (Delivered inside
+  // detectCapChanges; here we only surface the human-readable lines for the report.)
+  const capChanges = detectCapChanges(stateDir, modelsMap);
+  for (const c of capChanges) changes.push(capChangeText(c));
+
   // v0.8.0 (#73): event-sourced history. Dual-write every detected model change
   // to the append-only JSONL event log (source of truth). changelog.json is still
   // written by delivery for backward compatibility. Best-effort: a failed append
@@ -505,4 +620,12 @@ function isValidSnapshot(obj) {
   });
 }
 
-module.exports = { runPriceWatch, appendPriceHistory, extractModelMeta, isFreeModel, validateApiShape };
+module.exports = { runPriceWatch, appendPriceHistory, extractModelMeta, isFreeModel, validateApiShape, computeCapChanges, readPrevCaps, writeCurrentCaps, detectCapChanges };
+
+// Human-readable single line for a cap change (used in the report's "Changes
+// detected" list and as the model_change changelog message so the digest can
+// summarize it). "4x more expensive" reads naturally for a downgrade.
+function capChangeText(c) {
+  const moreLess = c.direction === 'downgraded' ? 'more expensive' : 'cheaper';
+  return `Quota moved for ${c.model}: $${c.oldCap} -> $${c.newCap} (${c.factor}x ${moreLess})`;
+}

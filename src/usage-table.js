@@ -25,6 +25,15 @@ const TABLE_PATH = path.join(__dirname, 'usage-table.json');
 const MONTHLY_CREDIT = 60;
 const DEFAULT_CAP = 60;
 
+// The documented set of public usage-cap tiers a model may sit on (USD/month of
+// the $60 credit that is effectively "used up" by the model). Used by the leaderboard
+// cap badges + the seed script. The live catalog's `usage` field carries the real value.
+const CAP_TIERS = [15, 30, 60, 100];
+
+// A no-op logger so callers that do not want the "cap unknown" warning (e.g. the
+// read-only calculator, the public-page builder) can pass it and stay silent.
+function silentLog() {}
+
 // In-memory cache. Loaded lazily from TABLE_PATH on first use; `setTable` (test
 // hook) overrides it so unit tests can inject a fixed table without touching disk.
 let table = null;
@@ -191,6 +200,8 @@ function effectiveTierCosts(cost, modelId, log) {
 module.exports = {
   MONTHLY_CREDIT,
   DEFAULT_CAP,
+  CAP_TIERS,
+  silentLog,
   multiplierForCap,
   getUsageCap,
   effectiveMultiplier,

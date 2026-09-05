@@ -132,6 +132,12 @@ function eventForChange(ch) {
         old: ch.oldTiers != null ? ch.oldTiers : null,
         new: ch.newTiers != null ? ch.newTiers : null
       });
+    case 'cap':
+      return Object.assign({}, base, {
+        type: 'quota-changed',
+        old: ch.oldCap != null ? ch.oldCap : null,
+        new: ch.newCap != null ? ch.newCap : null
+      });
     case 'free':
       if (ch.reason === 'removed')
         return Object.assign({}, base, { type: 'free-removed', old: ch.cost != null ? ch.cost : null, new: null });

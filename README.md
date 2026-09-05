@@ -70,6 +70,30 @@ You'll get alerts (in `state/alerts.log` and `state/report.md`) when:
 [`config.example.json`](config.example.json) only if you also want project
 pin-scanning, desktop popups, or a webhook.
 
+## Quota tiers + cheapest-effective leaderboard (v0.10.0)
+
+OpenCode Go applies a **$60 monthly credit**. A model whose monthly usage is
+capped at **$15** effectively costs **4×** its list price; $30 → 2×; $60 → 1×;
+$100 → 0.6×. "Models moving between caps = more expensive" is a first-class
+signal, not a footnote.
+
+- **Seeded caps.** `scripts/seed-usage-table.js` best-effort fetches the public
+  structured pricing source and writes the real per-model caps into
+  `src/usage-table.json` (with `source` + `seededAt` provenance). It is a
+  build/dev-time script only — the live monitor never blocks or fails on it, and
+  a failed fetch leaves the defaults in place. Re-run it to refresh.
+- **Cap-change alerts.** Each cycle the monitor diffs every model's cap (seeded
+  table, or a live `usage` field if `api.json` ever carries one) against the
+  previous snapshot and raises a prioritized, ⚠️ `model_change` alert on a move
+  — e.g. *"Quota moved for grok-4.6: $60 → $15 (4× more expensive)"*. Downgrades
+  rank top in the Discord model table + digest "What changed".
+- **Leaderboard.** `npm run leaderboard` ranks **all** models by effective
+  cost/request (asc), showing cap + multiplier + req/mo. The public page gains a
+  **Leaderboard** section (top-10, cap badges colored green = cheap) and the
+  Discord digest opens with **"Cheapest right now"** (top 3).
+- **Privacy.** The public page publishes only cap *tiers* (public pricing) — never
+  your personal usage percentage.
+
 ## Scope
 
 - **Standalone tool — no dependency on opencode-platform; usable by any OpenCode

@@ -28,6 +28,13 @@ function esc(s) {
     .replace(/'/g, '&#39;');
 }
 
+// Compact integer for the leaderboard's req/mo column (∞ for unbounded).
+function fmtInt(n) {
+  if (n == null) return '—';
+  if (!isFinite(n)) return '∞';
+  return Math.floor(n).toLocaleString('en-US');
+}
+
 // Build a text-bar sparkline from an array of numbers.
 //   - empty input -> '' (no data)
 //   - flat input  -> all mid bars (▄)
@@ -281,6 +288,17 @@ module.exports = { generateHistoryHtml, sparkline, esc, metricFor, buildPricingD
 // ===========================================================================
 
 const changeMetric = require('./change-metric');
+// v0.10.0 (#77): reuse the calculator's effective-cost + leaderboard math so the
+// public page's Leaderboard section and cap badges stay in lock-step with
+// `npm run leaderboard` / the Discord digest. calc only depends on usage-table
+// (public pricing, no secrets), so requiring it here is safe for the published page.
+const calc = require('./calc');
+const usageTable = require('./usage-table');
+
+// Silent cap lookup for the published page (no "cap unknown" warnings on render).
+function usageTableCap(id) {
+  return usageTable.getUsageCap(id, usageTable.silentLog);
+}
 
 // Default 7-day window used for the page's deltas + graph X axis.
 const PAGE_WINDOW_DAYS = 7;
@@ -378,9 +396,14 @@ function buildPricingData(history, pricingMap, opts) {
     const deltaOut = changeMetric.changeParts(ref.output, latest.output);
     const deltaIn = changeMetric.changeParts(ref.input, latest.input);
     const direction = (deltaOut && deltaOut.direction) || (deltaIn && deltaIn.direction) || 'flat';
+    // v0.10.0 (#77): the public usage-cap tier this model sits on (from the seeded
+    // usage-table.json — published pricing, never personal usage %). Drives the
+    // cap badge on the model table + the leaderboard.
+    const cap = usageTableCap(id);
     models.push({
       id,
       name: nameOf(id),
+      cap,
       current: cur,
       delta7d: {
         output: deltaToObj(deltaOut),
@@ -390,6 +413,27 @@ function buildPricingData(history, pricingMap, opts) {
       series: graphSeries
     });
   }
+
+  // v0.10.0 (#77): build the "cheapest effective cost × largest usage" leaderboard
+  // from the SAME effective-cost math as `npm run leaderboard`. Only models with a
+  // usable latest cost participate. Top 10 by effective $/request (asc).
+  const lbModels = {};
+  for (const m of models) {
+    const c = m.current;
+    if (c && (c.output != null || c.input != null || c.cache_read != null || c.cache_write != null)) {
+      lbModels[m.id] = { cost: { output: c.output, input: c.input, cache_read: c.cache_read, cache_write: c.cache_write } };
+    }
+  }
+  const leaderboard = calc
+    .leaderboard(lbModels, calc.DEFAULT_PATTERN, 10)
+    .map((r) => ({
+      id: r.id,
+      name: nameOf(r.id),
+      cap: r.cap,
+      multiplier: r.multiplier,
+      effective: r.effective,
+      requestsPerMo: r.requestsPerMo
+    }));
 
   // Top-10 movers by absolute output $/1M delta (fallback to input magnitude).
   const topMovers = models
@@ -428,6 +472,7 @@ function buildPricingData(history, pricingMap, opts) {
     windowDays,
     models,
     topMovers,
+    leaderboard,
     feed: feed.slice(0, 10)
   };
 }
@@ -445,11 +490,28 @@ function fmtDeltaCell(d) {
   return `${arrow} ${changeMetric.fmtPct(d)} (${changeMetric.fmtMult(d)}, ${changeMetric.fmtAbs(d)})`;
 }
 
-// Server-render the model table rows (escaped) with per-row direction color.
+// Color for a usage-cap tier badge: higher cap = cheaper effective cost (green);
+// lower cap ($15/$30) = more expensive (amber/red). Pure, public pricing only.
+function capBadgeColor(cap) {
+  if (cap == null) return '#95a5a6';
+  if (cap >= 60) return '#27ae60'; // green — effectively cheaper (≤1x)
+  if (cap >= 30) return '#e67e22'; // amber — 2x
+  return '#c0392b'; // red — 4x (more expensive)
+}
+
+// Format a cap badge cell: "$15" colored by tier.
+function fmtCapBadge(cap) {
+  if (cap == null) return '—';
+  return `<span class="cap-badge" style="color:${capBadgeColor(cap)};font-weight:600">$${cap}</span>`;
+}
+
+// Server-render the model table rows (escaped) with per-row direction color + the
+// public usage-cap tier badge (v0.10.0, #77). Cap tiers are published pricing, not
+// personal usage — no personal-quota data is rendered here.
 function renderPublicModelRows(data) {
   const models = data.models || [];
   if (models.length === 0) {
-    return '<tr><td colspan="5" class="muted">No models recorded in history.</td></tr>';
+    return '<tr><td colspan="6" class="muted">No models recorded in history.</td></tr>';
   }
   // Sort by id for a stable table; color reflects the 7d price direction.
   const sorted = models.slice().sort((a, b) => a.id.localeCompare(b.id));
@@ -459,6 +521,7 @@ function renderPublicModelRows(data) {
     return (
       `<tr class="dir-${esc(dir)}">` +
       `<td class="model"><code>${esc(m.name || m.id)}</code></td>` +
+      `<td class="mono">${fmtCapBadge(m.cap)}</td>` +
       `<td class="mono">${fmtMoneyCell(m.current && m.current.output)}</td>` +
       `<td class="mono">${fmtMoneyCell(m.current && m.current.input)}</td>` +
       `<td class="mono" style="color:${color};font-weight:600">${fmtDeltaCell(m.delta7d && m.delta7d.output)}</td>` +
@@ -467,6 +530,32 @@ function renderPublicModelRows(data) {
     );
   });
   return rows.join('\n');
+}
+
+// Server-render the Leaderboard section (v0.10.0, #77): top-10 cheapest effective
+// cost/request with cap badge + req/mo. Sorted cheapest-effective first; the
+// effective-cost cell is green (cheap). Cap badge colored by tier.
+function renderPublicLeaderboard(data) {
+  const lb = data.leaderboard || [];
+  if (lb.length === 0) {
+    return '<li class="muted">No models with usable cost data yet.</li>';
+  }
+  return lb
+    .map((r, i) => {
+      const effColor = '#27ae60'; // cheapest first → green
+      const eff = r.effective == null ? '—' : '$' + changeMetric.trimNum(r.effective);
+      const rpm = r.requestsPerMo == null ? '—' : fmtInt(r.requestsPerMo);
+      return (
+        `<li>` +
+        `<span class="rank">${i + 1}.</span> ` +
+        `<code>${esc(r.name || r.id)}</code> ` +
+        `<span class="mono" style="color:${effColor};font-weight:600">${eff}/req</span> ` +
+        `<span class="mono">cap ${fmtCapBadge(r.cap)}</span> ` +
+        `<span class="muted">· ${r.multiplier}x · ${rpm} req/mo</span>` +
+        `</li>`
+      );
+    })
+    .join('\n');
 }
 
 // Server-render the summarized feed list (escaped) with per-item direction dot.
@@ -508,6 +597,7 @@ function generatePublicPage(history, opts) {
 
   const modelRows = renderPublicModelRows(data);
   const feedItems = renderPublicFeed(data);
+  const leaderboardItems = renderPublicLeaderboard(data);
   const generatedAt = data.generatedAt;
   const sampleCount = (data.models || []).reduce((n, m) => n + (m.series ? m.series.length : 0), 0);
   const modelCount = data.models.length;
@@ -570,12 +660,21 @@ function generatePublicPage(history, opts) {
   <h2>Model table — 7-day price change</h2>
   <table>
     <thead>
-      <tr><th>Model</th><th>Output $/1M</th><th>Input $/1M</th><th>Δ7d output</th><th>Δ7d input</th></tr>
+      <tr><th>Model</th><th>Cap</th><th>Output $/1M</th><th>Input $/1M</th><th>Δ7d output</th><th>Δ7d input</th></tr>
     </thead>
     <tbody>
 ${modelRows}
     </tbody>
   </table>
+  <p class="note">"Cap" is the public usage-cap tier the model sits on ($15 → 4x effective, $30 → 2x, $60 → 1x, $100 → 0.6x). It is published pricing, not your personal usage.</p>
+</section>
+
+<section id="leaderboard">
+  <h2>Cheapest effective cost leaderboard</h2>
+  <p class="note">Ranked by effective cost per request (asc) = list price × (60 / cap). Green = cheapest. See also <code>npm run leaderboard</code>.</p>
+  <ol id="leaderboard-list">
+${leaderboardItems}
+  </ol>
 </section>
 
 <section id="feed">

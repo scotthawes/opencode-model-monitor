@@ -95,3 +95,35 @@ test('no secret / personal data leaks into the public page output', () => {
   assert.ok(jsonMatch, 'embedded JSON found');
   assert.ok(!jsonMatch[1].includes('leakme'), 'secret not in embedded JSON');
 });
+
+test('public page renders the Leaderboard section + cap badge (no personal usage)', () => {
+  const now = Date.parse('2026-09-08T00:00:00.000Z');
+  const hist = historyFrom([
+    { ts: '2026-09-01T00:00:00.000Z', id: 'cheap', output: 0.5 },
+    { ts: '2026-09-08T00:00:00.000Z', id: 'cheap', output: 0.5 }
+  ]);
+  const html = generatePublicPage(hist, {
+    pricing: { cheap: { meta: { name: 'Cheap' }, cost: { output: 0.5 } } },
+    now
+  });
+  assert.ok(html.toLowerCase().includes('leaderboard'), 'Leaderboard section present');
+  assert.ok(html.includes('id="leaderboard"'), 'leaderboard anchor present');
+  assert.ok(html.includes('cap-badge'), 'cap badge rendered');
+  // Cap tiers are published pricing, never the personal usage % — confirm the page
+  // does not publish the user's personal usage percentage from meta.
+  assert.ok(!html.toLowerCase().includes('quota'), 'no quota wording on public page');
+});
+
+test('buildPricingData exposes per-model cap + a leaderboard array', () => {
+  const now = Date.parse('2026-09-08T00:00:00.000Z');
+  const hist = historyFrom([
+    { ts: '2026-09-01T00:00:00.000Z', id: 'cheap', output: 0.5 },
+    { ts: '2026-09-08T00:00:00.000Z', id: 'cheap', output: 0.5 }
+  ]);
+  const data = buildPricingData(hist, { cheap: { meta: { name: 'Cheap' }, cost: { output: 0.5 } } }, { now });
+  assert.ok(Array.isArray(data.leaderboard), 'leaderboard array present');
+  assert.ok(data.leaderboard.length >= 1, 'leaderboard non-empty');
+  assert.strictEqual(data.leaderboard[0].id, 'cheap');
+  assert.ok('cap' in data.leaderboard[0], 'leaderboard row carries cap');
+  assert.ok('cap' in data.models[0], 'model carries cap');
+});

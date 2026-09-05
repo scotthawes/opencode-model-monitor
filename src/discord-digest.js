@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const delivery = require('./delivery');
 const changeMetric = require('./change-metric'); // shared Δ% / × / $ formatting
+const calc = require('./calc'); // effective cost + leaderboard (v0.10.0, #77)
 
 // Discord's incoming-webhook content limit is 2000 chars; we cap each digest
 // chunk at 1900 to leave headroom for the JSON envelope / username.
@@ -322,8 +323,29 @@ function buildDigestChunks(report, opts) {
   if (nextResetIso) tldrParts.push(`next reset ${delivery.humanizeReset(nextResetIso)}`);
   const tldr = tldrParts.join(' · ');
 
-  // --- chunk 1: TL;DR + what changed ---
+  // --- chunk 1: TL;DR + cheapest-now + what changed ---
   const c1 = [tldr, ''];
+
+  // v0.10.0 (#77): surface the top-3 cheapest effective cost/request models so
+  // the digest answers "what's the best deal right now" without opening the page.
+  // Effective = list × (60 / cap); computed from the same math as `npm run leaderboard`.
+  try {
+    const lbModels = {};
+    for (const id of Object.keys(models)) {
+      const c = models[id] && models[id].cost;
+      if (c && typeof c === 'object') lbModels[id] = { cost: c };
+    }
+    const lb = calc.leaderboard(lbModels, calc.DEFAULT_PATTERN, 3);
+    if (lb.length) {
+      const parts = lb.map(
+        (r) =>
+          `${r.id} ($${changeMetric.trimNum(r.effective)}/req, cap $${r.cap})`
+      );
+      c1.push('**Cheapest right now** ' + parts.join(' · '));
+    }
+  } catch (_) {
+    // best effort — never block the digest
+  }
   if (quiet) {
     c1.push('_No discrete changes — quota only._');
   } else {
