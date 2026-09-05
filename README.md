@@ -138,6 +138,42 @@ All output is written into the `state/` folder inside the repo (configurable via
 - `state/pricing-snapshot.json` — last seen pricing catalog (diff source).
 - `state/.etag-pricing` — cached ETag for cheap conditional GETs.
 
+### Price history (`state/history.json`)
+
+Every successful price-watch appends one dated sample to `state/history.json`,
+persisting the pricing catalog over time so drops and catalog changes can be
+trended and audited (the catalog is also the diff source for price alerts).
+
+Schema — a JSON array of samples, oldest→newest:
+
+```json
+[
+  {
+    "ts": "2026-09-05T10:12:00.000Z",
+    "models": {
+      "hy3": { "cost": { "input": 0.14, "output": 0.58, "cache_read": 0.035 }, "tiers": null }
+    }
+  }
+]
+```
+
+- Appended only on a successful, non-empty price fetch (HTTP 200 with a populated
+  catalog). A `304 Not Modified` or fetch failure does **not** append, to avoid
+  padding the series with duplicates.
+- Pruned to the last 90 days and capped at 500 samples (atomic tmp+rename write).
+- Best-effort: a write failure never throws or blocks alerts. A corrupt or missing
+  file is recovered by the next successful append.
+- `state/` is gitignored, so `history.json` is never committed.
+
+Show the recent series:
+
+```bash
+npm run report:history          # last 10 samples
+node src/report-cli.js --history 3
+```
+- `state/history.json` — append-only pricing time-series (one dated sample per
+  successful price-watch; schema below).
+
 ### Config knobs
 
 Create a `config.json` in the repo root to override any default. Merged over
