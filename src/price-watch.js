@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const delivery = require('./delivery');
+const events = require('./events'); // v0.8.0: event-sourced history (JSONL, #73)
 
 const API_URL = 'https://models.opencode.ai/api.json';
 
@@ -333,14 +334,27 @@ async function runPriceWatch(stateDir) {
         }
         if (JSON.stringify(a.tiers) !== JSON.stringify(b.tiers)) {
           changes.push(`Tiers changed for ${id}`);
-          modelChanges.push({ subtype: 'tiers', model: id, meta: (modelsMap[id] || {}).meta || null });
+          // Carry old/new tiers so the event log records the actual change.
+          modelChanges.push({
+            subtype: 'tiers',
+            model: id,
+            oldTiers: a.tiers || null,
+            newTiers: b.tiers || null,
+            meta: (modelsMap[id] || {}).meta || null
+          });
         }
       }
     }
     for (const id of prevIds) {
       if (!newIds.has(id)) {
         changes.push(`Removed model: ${id}`);
-        modelChanges.push({ subtype: 'removed', model: id, meta: (prev[id] || {}).meta || null });
+        // A drop is a first-class event: record it with the prior cost.
+        modelChanges.push({
+          subtype: 'removed',
+          model: id,
+          cost: (prev[id] || {}).cost || null,
+          meta: (prev[id] || {}).meta || null
+        });
       }
     }
   } else {
@@ -368,18 +382,36 @@ async function runPriceWatch(stateDir) {
     const newFreeIds = new Set(Object.keys(freeModels));
     for (const id of newFreeIds) {
       if (!prevFreeIds.has(id)) {
-        freeChanges.push({ subtype: 'free', reason: 'available', model: id, meta: (freeModels[id] || {}).meta || null });
+        freeChanges.push({
+          subtype: 'free',
+          reason: 'available',
+          model: id,
+          cost: (freeModels[id] || {}).cost || null,
+          meta: (freeModels[id] || {}).meta || null
+        });
       } else {
         const a = prevFree[id] || {};
         const b = freeModels[id] || {};
         if (JSON.stringify(a.cost) !== JSON.stringify(b.cost)) {
-          freeChanges.push({ subtype: 'free', reason: 'changed', model: id, meta: (freeModels[id] || {}).meta || null });
+          freeChanges.push({
+            subtype: 'free',
+            reason: 'changed',
+            model: id,
+            cost: b.cost || null,
+            meta: (freeModels[id] || {}).meta || null
+          });
         }
       }
     }
     for (const id of prevFreeIds) {
       if (!newFreeIds.has(id)) {
-        freeChanges.push({ subtype: 'free', reason: 'removed', model: id, meta: (prevFree[id] || {}).meta || null });
+        freeChanges.push({
+          subtype: 'free',
+          reason: 'removed',
+          model: id,
+          cost: (prevFree[id] || {}).cost || null,
+          meta: (prevFree[id] || {}).meta || null
+        });
       }
     }
   }
@@ -388,6 +420,14 @@ async function runPriceWatch(stateDir) {
     else if (fc.reason === 'changed') changes.push(`Free model changed: ${fc.model}`);
     else changes.push(`Free model available: ${fc.model}`);
     modelChanges.push(fc);
+  }
+
+  // v0.8.0 (#73): event-sourced history. Dual-write every detected model change
+  // to the append-only JSONL event log (source of truth). changelog.json is still
+  // written by delivery for backward compatibility. Best-effort: a failed append
+  // never affects the rest of the price-watch cycle.
+  if (modelChanges.length) {
+    events.appendChanges(stateDir, modelChanges);
   }
 
   try {

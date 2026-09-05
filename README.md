@@ -87,6 +87,65 @@ pin-scanning, desktop popups, or a webhook.
   launchd/systemd service). It does not install into `~/.config/opencode` or
   hook into OpenCode.
 
+## Architecture
+
+The monitor is **observational only** — it never mutates a model request. Its
+state has two layers: a *derived current view* (snapshots) and an *append-only
+event log* (the source of truth for history).
+
+### Current view (derived) vs event log (source of truth)
+
+- **Snapshots** — `state/pricing-snapshot.json` (latest catalog) and
+  `state/history.json` (per-cycle time-series) — are *derived, current-state*
+  views. They answer "what does model X cost **now**" and "what did the catalog
+  look like at sample N". They are recomputed every cycle and cannot tell you
+  *when* a model was added, dropped, or repriced.
+- **The event log** — `state/events-YYYY-MM.jsonl` (one file per UTC month) — is
+  the **source of truth for history**. One append-only JSON line per fact:
+
+  ```json
+  { "ts": "2026-09-05T10:12:00.000Z", "type": "cost-changed",
+    "model": "hy3", "old": { "input": 0.0175 }, "new": { "input": 0.14 } }
+  ```
+
+  Event types: `added`, `removed` (a **drop is a first-class event** — it
+  carries the prior cost), `cost-changed`, `tiers-changed`,
+  `free-available` / `free-changed` / `free-removed`. `old`/`new` hold the
+  prior/next cost (or tiers) and are `null` where not applicable.
+
+**Why JSONL + append-only** (vs rewriting a snapshot / changelog):
+
+- Add / drop / change are all just **appends** — no read-modify-write of a big
+  array, no rewrite cost when the catalog churns.
+- **Drops are first-class** — a removal is an explicit `removed` event with the
+  prior cost, instead of "the model is merely absent from the snapshot".
+- **`jq`-queryable** — a model's life, every drop, or a cost timeline is one
+  line of `jq` (see below).
+- **Monthly rotation** (`events-YYYY-MM.jsonl`) keeps files bounded and lets old
+  months be archived without touching the live one.
+- **Best-effort / never throws** — a failed append never affects alerts or the
+  snapshot write.
+
+`state/changelog.json` is **still written** this version (backward
+compatibility) but is a *derived* 7-day `model_change` list — not the source of
+truth. The read path prefers the event log and falls back to the changelog.
+
+### Querying the event log (grep / jq)
+
+```bash
+# A model's full life (every add / drop / cost / tier event), newest-ish:
+node src/report-cli.js --events hy3
+
+# Per-model life with jq, across all monthly files:
+jq -c 'select(.model=="hy3")' state/events-*.jsonl
+
+# Every model that was DROPPED, with its last known cost:
+jq -c 'select(.type=="removed")' state/events-*.jsonl
+
+# Cost timeline for one model (old -> new per change):
+jq -c 'select(.model=="hy3" and .type=="cost-changed")' state/events-*.jsonl
+```
+
 ## Usage
 
 A standalone Node.js CLI (CommonJS). It has **no dependency on opencode-platform**
@@ -136,6 +195,11 @@ All output is written into the `state/` folder inside the repo (configurable via
 - `state/report.json` — full structured report (always on by default).
 - `state/report.md` — human-readable rendering of the report.
 - `state/pricing-snapshot.json` — last seen pricing catalog (diff source).
+- `state/events-YYYY-MM.jsonl` — **append-only event log** (source of truth
+  for history): one JSON line per model add / drop / cost / tier / free change.
+  Rotates monthly; query with `node src/report-cli.js --events <model>` or `jq`.
+- `state/changelog.json` — derived 7-day `model_change` list (backward-compat
+  view; the event log is the authoritative history).
 - `state/.etag-pricing` — cached ETag for cheap conditional GETs.
 
 ### Price history (`state/history.json`)

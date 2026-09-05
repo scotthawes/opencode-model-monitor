@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 const usageTable = require('./usage-table');
+const events = require('./events'); // v0.8.0: event-sourced history (JSONL, #73)
 
 // Delivery channels. Configured once at startup with the user's delivery
 // options + the state directory. All functions are best-effort and never throw.
@@ -1482,6 +1483,14 @@ function buildModelChangeChunks(rows, lines) {
 async function deliverModelChangeTable(changes, opts) {
   opts = opts || {};
   ensureConfig();
+  // v0.8.0 (#73): dual-write every model change to the append-only JSONL event
+  // log (source of truth), regardless of alert dedup. Best-effort; never throws
+  // and never blocks the Discord/table delivery below.
+  try {
+    events.appendChanges(getStateDir(), changes);
+  } catch (_) {
+    // best effort
+  }
   const rows = [];
   const lines = [];
   for (const ch of changes || []) {

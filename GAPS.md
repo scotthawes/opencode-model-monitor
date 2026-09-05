@@ -110,3 +110,30 @@ for the v0.5.x cycle so the monitor never blocks on an external scrape:
 *Follow-up:* best-effort enrichment from **models.dev** structured data
 (timeout 10s, 24h cache in `state/`, never block the cycle, never fail hard).
 This is tracked separately and does not gate the api.json-only metadata ship.
+
+## Event-sourced history (v0.8.0, #73)
+
+History moved from a derived snapshot/changelog to an **append-only JSONL event
+log** (`state/events-YYYY-MM.jsonl`) as the source of truth. Decision + why:
+
+- **Flexibility for add / drop / change.** A snapshot only ever answers "what is
+  the model's current cost?" — it cannot record *when* a model appeared or
+  vanished. The event log treats an add, a drop, and a reprice as equal
+  first-class facts, so questions like "list everything that was dropped" become
+  a single `jq` filter instead of diffing two snapshots.
+- **No rewrite cost.** The old `changelog.json` was a capped array rewritten
+  every cycle (and pruned to 7 days). The JSONL log is pure append — adding or
+  dropping a model never re-reads or rewrites the whole history, and rotation is
+  just "start a new month file".
+- **`jq`-queryable.** Each line is a flat `{ ts, type, model, old, new }`
+  record, so per-model life, drops, and cost timelines are trivial one-liners
+  (`jq 'select(.model=="hy3")' state/events-*.jsonl`) with no custom parser.
+- **Backward compatibility.** `changelog.json` is still written this version
+  (dual-write) so existing readers (digest, history view) keep working; the read
+  path prefers the event log and falls back to the changelog. The legacy
+  changelog is migrated once into the event log via `migrateFromChangelog()`
+  (guarded by a `.events-migrated` marker).
+- **Safe by construction.** Append is best-effort and never throws, so a failed
+  write can never affect alerts or the snapshot write. `state/` is gitignored, so
+  the event log (and the migration marker) are never committed.
+
