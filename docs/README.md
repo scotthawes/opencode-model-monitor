@@ -4,10 +4,10 @@
 > pricing data only. It contains **no** usage, quota, credentials, or local
 > filesystem paths.
 
-Generated: 2026-09-05T15:21:28.433Z
+Generated: 2026-09-05T20:54:36.373Z
 
 - **36** model(s) tracked
-- **8** price-history sample(s)
+- **10** price-history sample(s)
 - **70** public pricing-change event(s)
 
 ## Page sections (index.html)

@@ -176,6 +176,21 @@ function rankByEffective(models, pattern, limit) {
   return typeof limit === 'number' ? rows.slice(0, limit) : rows;
 }
 
+// Rank every model by effective cost/request (ascending) for a token pattern,
+// annotated with its usage CAP and effective multiplier, so the user can see
+// "cheapest effective cost × largest usage" at a glance (v0.10.0, #77). Returns
+// an array of { id, cap, multiplier, raw, effective, requestsPerMo } for models
+// with a computable cost; sorted cheapest-effective first.
+function leaderboard(models, pattern, limit) {
+  const rows = rankByEffective(models, pattern);
+  for (const r of rows) {
+    r.cap = usageTable.getUsageCap(r.id, SILENT_LOG);
+    r.multiplier = usageTable.effectiveMultiplier(r.id, SILENT_LOG);
+    r.requestsPerMo = requestsPerMonth(r.effective);
+  }
+  return typeof limit === 'number' ? rows.slice(0, limit) : rows;
+}
+
 // --- Catalog fetch (read-only GET) ------------------------------------------
 
 // Fetch the public opencode-go catalog and return a models map keyed by id:
@@ -223,6 +238,8 @@ function parseArgs(argv) {
       args.pattern = { input: parts[0], cachedRead: parts[1], output: parts[2] };
     } else if (a === '--help' || a === '-h') {
       args.help = true;
+    } else if (a === '--leaderboard' || a === '-L') {
+      args.leaderboard = true;
     } else if (!a.startsWith('-')) {
       positional.push(a);
     }
@@ -290,12 +307,14 @@ async function main() {
     process.exit(2);
   }
 
-  if (args.help || !args.model) {
+  if (args.help || (!args.model && !args.leaderboard)) {
     console.log(
       'Usage: node src/calc.js <model> [--pattern in,cached,out]\n' +
-        '  <model>   fuzzy-matched model id (e.g. qwen3.7-max)\n' +
-        '  --pattern comma list of input,cachedRead,output token counts\n' +
+        '  <model>      fuzzy-matched model id (e.g. qwen3.7-max)\n' +
+        '  --pattern    comma list of input,cachedRead,output token counts\n' +
+        '  --leaderboard  rank ALL models by cheapest effective cost/request (cap + req/mo)\n' +
         'Example: node src/calc.js qwen3.7-max --pattern 100,5000,50\n' +
+        '         node src/calc.js --leaderboard\n' +
         'Read-only calculator — fetches the public catalog, writes nothing.'
     );
     process.exit(args.help ? 0 : 2);
@@ -306,6 +325,29 @@ async function main() {
   if (!models || Object.keys(models).length === 0) {
     console.error('Error: failed to fetch model catalog from ' + API_URL);
     process.exit(1);
+  }
+
+  if (args.leaderboard) {
+    const rows = leaderboard(models, pattern, 10);
+    console.log('');
+    console.log('Cheapest effective cost leaderboard (top ' + rows.length + ', 10 shown)');
+    console.log('─'.repeat(72));
+    console.log('rank  model'.padEnd(42) + 'eff $/req'.padStart(14) + 'cap'.padStart(8) + '×'.padStart(6) + 'req/mo'.padStart(12));
+    rows.forEach((r, i) => {
+      const name = (i + 1) + '. ' + r.id;
+      console.log(
+        '  ' + name.padEnd(40) +
+          fmtUsd(r.effective).padStart(14) +
+          ('$' + r.cap).padStart(8) +
+          (r.multiplier + 'x').padStart(6) +
+          fmtInt(r.requestsPerMo).padStart(12)
+      );
+    });
+    console.log('─'.repeat(72));
+    console.log('Effective = list x (60 / cap). Cap tiers: $15 (4x) / $30 (2x) / $60 (1x) / $100 (0.6x).');
+    console.log('Read-only — fetches the public catalog, writes nothing.');
+    console.log('');
+    process.exit(0);
   }
 
   const match = findModel(models, args.model);
@@ -328,6 +370,7 @@ module.exports = {
   requestsPerMonth,
   findModel,
   rankByEffective,
+  leaderboard,
   fetchModelsMap,
   parseArgs,
   render
