@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const delivery = require('./delivery');
 const events = require('./events'); // v0.8.0: event-sourced history (JSONL, #73)
+const changeMetric = require('./change-metric'); // shared Δ% / × / $ formatting
 
 const API_URL = 'https://models.opencode.ai/api.json';
 
@@ -329,7 +330,14 @@ async function runPriceWatch(stateDir) {
         const a = prev[id] || {};
         const b = modelsMap[id] || {};
         if (JSON.stringify(a.cost) !== JSON.stringify(b.cost)) {
-          changes.push(`Cost changed for ${id}: ${JSON.stringify(a.cost)} -> ${JSON.stringify(b.cost)}`);
+          // PR page spec #4: append the change metric (Δ% / × / $) to the cost
+          // line so report.md states the magnitude, not just old→new. Prefer
+          // output $/1M, fall back to input.
+          const cm =
+            changeMetric.fmtChangeMetric(a.cost && a.cost.output, b.cost && b.cost.output) ||
+            changeMetric.fmtChangeMetric(a.cost && a.cost.input, b.cost && b.cost.input);
+          const base = `Cost changed for ${id}: ${JSON.stringify(a.cost)} -> ${JSON.stringify(b.cost)}`;
+          changes.push(cm ? `${base}  | ${cm}` : base);
           modelChanges.push({ subtype: 'cost', model: id, oldCost: a.cost || null, newCost: b.cost || null, meta: (modelsMap[id] || {}).meta || null });
         }
         if (JSON.stringify(a.tiers) !== JSON.stringify(b.tiers)) {

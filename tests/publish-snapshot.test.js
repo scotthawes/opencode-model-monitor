@@ -135,7 +135,7 @@ test('buildSnapshot writes all docs files and they pass the privacy guard', () =
   assert.ok(written, 'returns a list of written files');
   const names = written.map((f) => path.basename(f)).sort();
   assert.deepStrictEqual(names,
-    ['README.md', 'changelog.json', 'history.json', 'index.html', 'pricing-snapshot.json'].sort());
+    ['README.md', 'changelog.json', 'history.json', 'index.html', 'pricing.json', 'pricing-snapshot.json'].sort());
 
   // No personal "secret" field leaked through.
   const pricingOut = fs.readFileSync(path.join(outDir, 'pricing-snapshot.json'), 'utf8');
@@ -152,6 +152,69 @@ test('buildSnapshot writes all docs files and they pass the privacy guard', () =
       assert.ok(!fs.readFileSync(f, 'utf8').toLowerCase().includes(needle.toLowerCase()),
         `forbidden ${needle} must not appear in ${path.basename(f)}`);
     }
+  }
+});
+
+test('buildSnapshot writes pricing.json with 7-day deltas and a redesigned index.html', () => {
+  const inDir = tmpDir();
+  const outDir = tmpDir();
+  // Two models, output cost moves up over time so we can assert a delta + color.
+  const hist = [
+    { ts: '2026-09-01T00:00:00.000Z', models: { hy3: { cost: { input: 0.14, output: 0.0725 }, tiers: null } } },
+    { ts: '2026-09-05T00:00:00.000Z', models: { hy3: { cost: { input: 0.14, output: 0.58 }, tiers: null } } }
+  ];
+  fs.writeFileSync(path.join(inDir, 'pricing-snapshot.json'), JSON.stringify({
+    hy3: { cost: { input: 0.14, output: 0.58 }, tiers: null, meta: { name: 'Hy3' } }
+  }));
+  fs.writeFileSync(path.join(inDir, 'history.json'), JSON.stringify(hist));
+  fs.writeFileSync(path.join(inDir, 'changelog.json'), JSON.stringify([]));
+
+  const written = buildSnapshot(outDir, inDir);
+  const names = written.map((f) => path.basename(f));
+  assert.ok(names.includes('pricing.json'), 'pricing.json written');
+  assert.ok(names.includes('index.html'), 'index.html written');
+
+  // pricing.json carries 7d deltas per model.
+  const pd = JSON.parse(fs.readFileSync(path.join(outDir, 'pricing.json'), 'utf8'));
+  assert.strictEqual(pd.models.length, 1);
+  assert.strictEqual(pd.models[0].id, 'hy3');
+  assert.ok(pd.models[0].delta7d, 'has delta7d block');
+  assert.strictEqual(pd.models[0].delta7d.direction, 'up', 'output rose -> up');
+  assert.ok(Math.abs(pd.models[0].delta7d.output.pct - 700) < 1, 'output rose ~700%');
+
+  // index.html: embedded JSON + canvas + full-log link + feed section.
+  const html = fs.readFileSync(path.join(outDir, 'index.html'), 'utf8');
+  assert.ok(html.includes('<canvas'), 'canvas element for the graph');
+  assert.ok(html.includes('id="pricing-data"'), 'embedded pricing JSON present');
+  assert.ok(html.includes('Full log → changelog.json'), 'full-log link present');
+  assert.ok(html.includes('Recent price changes'), 'feed section present');
+  // No personal account quota leaked onto the public page.
+  assert.ok(!html.toLowerCase().includes('quota'), 'no quota wording on public page');
+});
+
+test('pricing.json feed is capped at 10 events and carries change metrics', () => {
+  const inDir = tmpDir();
+  const outDir = tmpDir();
+  // 12 output-cost changes across samples -> feed must cap at 10.
+  const hist = [];
+  let out = 0.1;
+  for (let i = 0; i < 13; i++) {
+    hist.push({ ts: `2026-09-0${i + 1}T00:00:00.000Z`, models: { hy3: { cost: { output: out }, tiers: null } } });
+    out += 0.05;
+  }
+  fs.writeFileSync(path.join(inDir, 'pricing-snapshot.json'), JSON.stringify({
+    hy3: { cost: { output: out }, tiers: null, meta: { name: 'Hy3' } }
+  }));
+  fs.writeFileSync(path.join(inDir, 'history.json'), JSON.stringify(hist));
+  fs.writeFileSync(path.join(inDir, 'changelog.json'), JSON.stringify([]));
+
+  const written = buildSnapshot(outDir, inDir);
+  const pd = JSON.parse(fs.readFileSync(path.join(outDir, 'pricing.json'), 'utf8'));
+  assert.ok(pd.feed.length <= 10, 'feed capped at 10, got ' + pd.feed.length);
+  assert.ok(pd.feed.every((e) => typeof e.text === 'string' && e.text.length > 0), 'every feed item has text');
+  // Newest first.
+  for (let i = 1; i < pd.feed.length; i++) {
+    assert.ok(Date.parse(pd.feed[i - 1].ts) >= Date.parse(pd.feed[i].ts), 'feed newest-first');
   }
 });
 

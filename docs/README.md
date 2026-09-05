@@ -4,20 +4,32 @@
 > pricing data only. It contains **no** usage, quota, credentials, or local
 > filesystem paths.
 
-Generated: 2026-09-05T12:49:54.774Z
+Generated: 2026-09-05T15:21:28.433Z
 
 - **36** model(s) tracked
-- **5** price-history sample(s)
+- **8** price-history sample(s)
 - **70** public pricing-change event(s)
+
+## Page sections (index.html)
+
+1. **Price graph** — output (or input) $/1M over time, one line per model. Defaults
+   to the top-10 movers; type a model id/name to add any model. Coloring reflects
+   the 7-day price direction (green = down, red = up, grey = flat).
+2. **Model table** — current output/input $/1M with the 7-day delta (% / × / $) per
+   model, rows colored by direction. No per-model usage is published, so usage
+   coloring is intentionally N/A (price-only).
+3. **Recent feed** — last 8-10 summarized price-change one-liners with change
+   metric, plus a link to the full public log (`changelog.json`).
 
 ## What is published
 
 | File | Contents |
 | --- | --- |
-| `index.html` | Static compare/history view (from P2-1) |
+| `index.html` | Redesigned public page: price graph (Chart.js) + 7-day-colored model table + summarized feed |
+| `pricing.json` | Allowlisted page data: 7-day deltas per model, graph series, top movers, recent feed |
 | `pricing-snapshot.json` | Latest public per-model pricing (cost / tiers / meta) |
 | `history.json` | Public per-sample pricing history |
-| `changelog.json` | Only `model_change` events (pricing changes) |
+| `changelog.json` | Only `model_change` events (pricing changes) — linked as the "Full log" |
 
 ## Regenerate locally
 

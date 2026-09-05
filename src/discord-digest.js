@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const delivery = require('./delivery');
+const changeMetric = require('./change-metric'); // shared Δ% / × / $ formatting
 
 // Discord's incoming-webhook content limit is 2000 chars; we cap each digest
 // chunk at 1900 to leave headroom for the JSON envelope / username.
@@ -102,14 +103,15 @@ function describeEvent(ev) {
       try {
         const oldC = JSON.parse(cost[2]);
         const newC = JSON.parse(cost[3]);
-        const o = oldC.input;
-        const n = newC.input;
-        let multStr = '';
-        if (o && n && o !== n) {
-          const ratio = n / o;
-          multStr = ratio >= 1 ? ` (${Math.round(ratio)}x)` : ` (${Math.round(1 / ratio)}x lower)`;
-        }
-        desc = `${model} cost ${fmtNum(o)}→${fmtNum(n)}${multStr}`;
+        // Prefer output $/1M (the page's headline metric); fall back to input
+        // when output is absent. PR page spec #4: always carry Δ% / × / $.
+        const useOutput = typeof newC.output === 'number';
+        const o = useOutput ? oldC.output : oldC.input;
+        const n = useOutput ? newC.output : newC.input;
+        const metric = changeMetric.fmtChangeMetric(o, n);
+        desc =
+          `${model} ${useOutput ? 'output' : 'input'} ${fmtNum(o)}→${fmtNum(n)}` +
+          (metric ? ` ${metric}` : '');
       } catch (_) {
         desc = `${model} cost changed`;
       }
