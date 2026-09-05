@@ -96,3 +96,17 @@ provider-switch to free-tier and context-window tiers.
 This single change closes #1, #2, #5–#9. #3–#4 are policy/workflow
 (orchestrator consults `model-select`; add override allowlist). #10–#12 are
 hardening.
+
+## Metadata follow-ups (P0-2, issue #48)
+
+`pricing-snapshot.json` now carries `meta` per model (capabilities, context
+window `limit`, provider npm, open_weights, knowledge) parsed from `api.json`.
+Two fields are **not** available in `api.json` and are intentionally out of scope
+for the v0.5.x cycle so the monitor never blocks on an external scrape:
+
+- **privacy** (e.g. training-data / zero-retention guarantees)
+- **training** data cutoff beyond the coarse `knowledge` date
+
+*Follow-up:* best-effort enrichment from **models.dev** structured data
+(timeout 10s, 24h cache in `state/`, never block the cycle, never fail hard).
+This is tracked separately and does not gate the api.json-only metadata ship.

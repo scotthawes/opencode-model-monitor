@@ -11,7 +11,7 @@ const os = require('os');
 const path = require('path');
 
 const delivery = require('../src/delivery');
-const { runPriceWatch } = require('../src/price-watch');
+const { runPriceWatch, extractModelMeta } = require('../src/price-watch');
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'mbg-price-'));
@@ -127,3 +127,108 @@ test('no diff when catalog is identical', async () => {
     fs.rmSync(d, { recursive: true, force: true });
   }
 });
+
+// --- P0-2: metadata extraction (capabilities / context / provider) ----------
+
+test('metadata extraction preserves cost diff (additive, never breaks cost/tiers)', async () => {
+  const d = tmpDir();
+  try {
+    setup(d);
+    writeSnapshot(d, { a: mk({ input: 1 }) });
+    // Catalog entry carries full metadata alongside cost.
+    const fullModel = {
+      cost: { input: 2 },
+      limit: { context: 1000000, output: 65536 },
+      provider: { npm: '@ai-sdk/anthropic' },
+      tool_call: true,
+      reasoning: true,
+      attachment: false,
+      structured_output: true,
+      temperature: true,
+      modalities: { input: ['text', 'image'], output: ['text'] },
+      open_weights: false,
+      knowledge: '2025-04',
+      name: 'Model A'
+    };
+    mockFetch({ a: fullModel });
+    const r = await runPriceWatch(d);
+    // Cost diff must still be detected exactly as before.
+    assert.ok(
+      r.changes.some((c) => c.includes('Cost changed for a:') && c.includes('{"input":1}') && c.includes('{"input":2}')),
+      'expected cost-change line preserved, got: ' + JSON.stringify(r.changes)
+    );
+    // And the structured change must carry the metadata.
+    const change = (r.modelChanges || []).find((c) => c.model === 'a' && c.subtype === 'cost');
+    assert.ok(change, 'expected a cost modelChange entry, got: ' + JSON.stringify(r.modelChanges));
+    assert.ok(change.meta, 'expected meta on the cost change');
+    assert.strictEqual(change.meta.contextWindow, 1000000);
+    assert.strictEqual(change.meta.provider, '@ai-sdk/anthropic');
+    assert.strictEqual(change.meta.capabilities.tool_call, true);
+    assert.strictEqual(change.meta.capabilities.reasoning, true);
+    // Snapshot now persists meta for the model.
+    const snap = JSON.parse(fs.readFileSync(path.join(d, 'pricing-snapshot.json'), 'utf8'));
+    assert.ok(snap.a.meta && snap.a.meta.contextWindow === 1000000, 'snapshot should persist meta');
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('metadata extraction handles missing fields gracefully (no crash, all-null)', async () => {
+  const d = tmpDir();
+  try {
+    setup(d);
+    writeSnapshot(d, { a: mk({ input: 1 }), b: mk({ input: 2 }) });
+    // `b` is removed; `a` keeps only cost (no metadata at all).
+    mockFetch({ a: mk({ input: 1 }) });
+    const r = await runPriceWatch(d);
+    assert.ok(
+      r.changes.some((c) => c.includes('Removed model: b')),
+      'expected a "Removed model: b" change, got: ' + JSON.stringify(r.changes)
+    );
+    // Meta is present but empty for the surviving model — no throw, no false diff.
+    const snap = JSON.parse(fs.readFileSync(path.join(d, 'pricing-snapshot.json'), 'utf8'));
+    assert.ok('meta' in snap.a, 'snapshot entry should have a meta key');
+    assert.strictEqual(snap.a.meta.contextWindow, null);
+    assert.strictEqual(snap.a.meta.provider, null);
+    assert.strictEqual(snap.a.meta.capabilities, null);
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('extractModelMeta maps api.json fields and degrades to nulls', () => {
+  const full = extractModelMeta({
+    name: 'Qwen3.7 Max',
+    limit: { context: 256000, output: 65536 },
+    provider: { npm: '@ai-sdk/anthropic' },
+    tool_call: true,
+    reasoning: true,
+    attachment: false,
+    structured_output: true,
+    modalities: { input: ['text', 'image'], output: ['text'] },
+    open_weights: true,
+    knowledge: '2025-04',
+    release_date: '2026-05-21'
+  });
+  assert.strictEqual(full.name, 'Qwen3.7 Max');
+  assert.strictEqual(full.contextWindow, 256000);
+  assert.strictEqual(full.outputLimit, 65536);
+  assert.strictEqual(full.provider, '@ai-sdk/anthropic');
+  assert.strictEqual(full.open_weights, true);
+  assert.strictEqual(full.knowledge, '2025-04');
+  assert.strictEqual(full.capabilities.tool_call, true);
+  assert.strictEqual(full.capabilities.reasoning, true);
+  assert.strictEqual(full.capabilities.attachment, false);
+  assert.deepStrictEqual(full.capabilities.modalities.input, ['text', 'image']);
+
+  const minimal = extractModelMeta({ id: 'x' });
+  assert.strictEqual(minimal.contextWindow, null);
+  assert.strictEqual(minimal.provider, null);
+  assert.strictEqual(minimal.capabilities, null);
+  assert.strictEqual(minimal.open_weights, null);
+
+  // Provider id without npm still captured if a string/object id is present.
+  const pid = extractModelMeta({ provider: { id: 'openai' } });
+  assert.strictEqual(pid.provider, 'openai');
+});
+
