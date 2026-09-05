@@ -722,6 +722,18 @@ function readUsageHistory() {
   }
 }
 
+// Best-effort read of the persisted pricing time-series (history.json) from
+// STATE_DIR. Returns the array of samples (or [] if missing/corrupt). Never throws.
+function readPriceHistory() {
+  try {
+    const raw = fs.readFileSync(path.join(STATE_DIR, 'history.json'), 'utf8');
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (_) {
+    return [];
+  }
+}
+
 // Compute 7-day quota movement for a single window from the time-series.
 // Picks the oldest sample still inside the 7-day window (falling back to the
 // oldest sample overall when none is within the window / has a value). Returns
@@ -792,6 +804,8 @@ function renderMarkdown(report) {
   if (p.modelCount != null) {
     lines.push('');
     lines.push(`Models tracked: ${p.modelCount}`);
+    const ph = readPriceHistory().length;
+    lines.push(`Price history: ${ph} sample${ph === 1 ? '' : 's'}`);
   }
   lines.push('');
 
@@ -1139,6 +1153,7 @@ module.exports = {
   setStateDir,
   getStateDir,
   readUsageHistory,
+  readPriceHistory,
   windowInfo,
   deliverModelChangeTable,
   buildModelChangeChunks,

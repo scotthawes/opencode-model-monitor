@@ -6,6 +6,55 @@ const delivery = require('./delivery');
 
 const API_URL = 'https://models.opencode.ai/api.json';
 
+// --- Price history time-series ---------------------------------------------
+//
+// Persist a dated pricing sample on every successful price-watch so price drops
+// and catalog changes can be trended/audited over time (unlocks P1-4/P2-1). The
+// history is a JSON array of samples (oldest→newest):
+//   [ { ts: <ISO>, models: { <id>: { cost, tiers } } }, ... ]
+// See README "Price history" for the documented schema.
+//
+// Best-effort and fully non-blocking: any failure is swallowed so the alert path
+// and snapshot write are never affected. Written atomically (tmp file + rename)
+// so a crash mid-write can never leave a half-written array. A corrupt/missing
+// history file is simply replaced by a fresh valid array on the next append.
+const HISTORY_FILE = 'history.json';
+const HISTORY_MAX_ENTRIES = 500;
+const HISTORY_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000; // prune samples older than 90d
+
+// Append a dated sample of the current model catalog to state/history.json.
+// `modelsMap` is the same { id: { cost, tiers } } shape price-watch diffs.
+// Never throws; never blocks the caller.
+function appendPriceHistory(stateDir, modelsMap) {
+  try {
+    const historyPath = path.join(stateDir, HISTORY_FILE);
+    let arr = [];
+    try {
+      const raw = fs.readFileSync(historyPath, 'utf8');
+      const parsed = JSON.parse(raw);
+      // A present-but-corrupt history is replaced (recovered) by the atomic write
+      // below; a non-array shape is also reset to a fresh array.
+      arr = Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      arr = []; // missing file → first sample
+    }
+
+    arr.push({ ts: new Date().toISOString(), models: modelsMap });
+
+    const cutoff = Date.now() - HISTORY_MAX_AGE_MS;
+    arr = arr.filter((s) => (s.ts ? Date.parse(s.ts) : 0) >= cutoff);
+    if (arr.length > HISTORY_MAX_ENTRIES) {
+      arr = arr.slice(arr.length - HISTORY_MAX_ENTRIES);
+    }
+
+    const tmp = historyPath + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(arr, null, 2));
+    fs.renameSync(tmp, historyPath);
+  } catch (_) {
+    // best effort — never throw, never block alerts
+  }
+}
+
 // Writes a placeholder pricing snapshot on the very first run when pricing
 // could not be fetched (e.g. offline). This guarantees state/pricing-snapshot.json
 // exists so downstream readers never treat a missing file as a fresh, full diff.
@@ -152,6 +201,10 @@ async function runPriceWatch(stateDir) {
     delivery.alert('warning', 'Pricing snapshot save failed', String(e && e.message ? e.message : e));
   }
 
+  // Persist the time-series sample (additive change; never blocks the alert
+  // path). Only reached on a successful, non-empty price fetch.
+  appendPriceHistory(stateDir, modelsMap);
+
   // alerts.log still gets the human-readable single lines, while Discord gets a
   // single aggregated table post (old->new per metric) instead of N one-liners.
   if (modelChanges.length) {
@@ -189,4 +242,4 @@ function isValidSnapshot(obj) {
   });
 }
 
-module.exports = { runPriceWatch };
+module.exports = { runPriceWatch, appendPriceHistory };
