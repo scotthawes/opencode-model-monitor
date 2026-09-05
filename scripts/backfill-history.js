@@ -372,6 +372,7 @@ module.exports = {
   mapSeedData,
   fetchSeedHistory,
   readHistory,
+  writeHistoryAtomic,
   collectCostChangedEvents,
   SEED_URLS,
   run

@@ -24,6 +24,15 @@
 const fs = require('fs');
 const path = require('path');
 
+// Additive metadata fields some event types carry (never part of the dedup
+// signature; consumers that don't know about them ignore them):
+//   availableFrom — when a free model first became available (free-available)
+//   duration      — how long a free model was available before removal ("19 days")
+//   note          — free-text context for info/privacy events
+//   privacy       — { training, zdrValidUntil } for privacy-changed events
+//   usageCap      — the monthly usage cap observed at add time (added events)
+const EXTRA_FIELDS = ['availableFrom', 'duration', 'note', 'privacy', 'usageCap'];
+
 // Matches monthly rotation files: events-2026-09.jsonl
 const EVENT_RE = /^events-(\d{4})-(\d{2})\.jsonl$/;
 
@@ -54,6 +63,10 @@ function appendEvent(stateDir, ev) {
     old: ev.old !== undefined ? ev.old : null,
     new: ev.new !== undefined ? ev.new : null
   };
+  // Forward additive metadata (see EXTRA_FIELDS) without affecting the dedup sig.
+  for (const k of EXTRA_FIELDS) {
+    if (ev[k] !== undefined) rec[k] = ev[k];
+  }
   const sig = sigOf(rec);
   if (recentSigs.has(sig)) return; // same-run dual-write → skip
   try {
@@ -140,14 +153,27 @@ function eventForChange(ch) {
       });
     case 'free':
       if (ch.reason === 'removed')
-        return Object.assign({}, base, { type: 'free-removed', old: ch.cost != null ? ch.cost : null, new: null });
+        return Object.assign({}, base, {
+          type: 'free-removed',
+          old: ch.cost != null ? ch.cost : null,
+          new: null,
+          availableFrom: ch.availableFrom,
+          duration: ch.duration
+        });
       if (ch.reason === 'changed')
         return Object.assign({}, base, {
           type: 'free-changed',
           old: ch.cost != null ? ch.cost : null,
-          new: ch.cost != null ? ch.cost : null
+          new: ch.cost != null ? ch.cost : null,
+          availableFrom: ch.availableFrom
         });
-      return Object.assign({}, base, { type: 'free-available', old: null, new: ch.cost != null ? ch.cost : null });
+      return Object.assign({}, base, {
+        type: 'free-available',
+        old: null,
+        new: ch.cost != null ? ch.cost : null,
+        availableFrom: ch.availableFrom,
+        duration: ch.duration
+      });
     default:
       return null;
   }
