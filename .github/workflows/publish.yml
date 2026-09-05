@@ -1,0 +1,69 @@
+name: Publish snapshot (Pages)
+
+# P2-3 (Closes #56): rebuild the public docs/ snapshot and (optionally) deploy
+# it to GitHub Pages. Deployment is OFF by default — see docs/README.md for the
+# opt-in steps. The build step always runs so the snapshot stays verifiable in
+# CI; only the deploy step is gated behind the ENABLE_PAGES repo variable.
+
+on:
+  schedule:
+    # Daily, at a stable off-peak minute.
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+  # Also rebuild on changes to the publish pipeline itself.
+  push:
+    paths:
+      - 'scripts/publish-snapshot.js'
+      - '.github/workflows/publish.yml'
+      - 'src/history-view.js'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build public snapshot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies (ci, reproducible)
+        run: npm ci
+
+      - name: Syntax check (no network)
+        run: node --check scripts/publish-snapshot.js
+
+      - name: Rebuild public snapshot (docs/)
+        run: node scripts/publish-snapshot.js
+
+      - name: Privacy guardrail — scan docs/ for personal data
+        run: |
+          ! grep -rniE 'auth\.json|config\.json|subscribers\.json|webhook|subscribers|secret|password|token|gho_|ghp_|api_?key|bearer |/Users/|/home/|/root/|C:\\' docs/ \
+            || { echo "PRIVACY VIOLATION: forbidden substring found in docs/"; exit 1; }
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    if: ${{ vars.ENABLE_PAGES == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

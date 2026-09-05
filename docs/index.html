@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model Budget Guard — Price History</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         margin: 0; padding: 1.5rem; max-width: 980px; }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1.1rem; margin: 1.8rem 0 .5rem; border-bottom: 1px solid #ccc; padding-bottom: .25rem; }
+  .sub { color: #888; margin: 0 0 1rem; }
+  #filter { width: 100%; box-sizing: border-box; padding: .5rem; margin: .5rem 0 1rem;
+            border: 1px solid #aaa; border-radius: 6px; font-size: 1rem; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid #e2e2e2; vertical-align: top; }
+  th { font-size: .8rem; text-transform: uppercase; letter-spacing: .03em; color: #666; }
+  .mono, code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .mono { white-space: nowrap; }
+  .spark { font-size: 1.1rem; letter-spacing: .08em; white-space: nowrap; }
+  .muted { color: #999; }
+  .model code { font-weight: 600; }
+  .lvl-warning td.lvl { color: #b8860b; font-weight: 600; }
+  .lvl-model_change td.lvl { color: #2a7; font-weight: 600; }
+  .lvl-error td.lvl { color: #c33; font-weight: 600; }
+  tr.hidden { display: none; }
+  footer { margin-top: 2rem; color: #888; font-size: .8rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Model Budget Guard — Price History</h1>
+  <p class="sub">Generated 2026-09-05T12:49:54.774Z · 5 sample(s) · 35 model(s) tracked</p>
+</header>
+
+<section id="compare">
+  <h2>Model compare — last-10 output-cost trend</h2>
+  <input id="filter" type="search" placeholder="Filter models…" aria-label="Filter models">
+  <table>
+    <thead>
+      <tr><th>Model</th><th>Input $/1M</th><th>Output $/1M</th><th>Trend (text bars)</th></tr>
+    </thead>
+    <tbody>
+<tr data-id="deepseek-v4-flash"><td class="model"><code>DeepSeek V4 Flash</code></td><td class="mono">$0.2200</td><td class="mono">$0.6600</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="deepseek-v4-flash-vision-exp"><td class="model"><code>DeepSeek V4 Flash Vision Exp</code></td><td class="mono">$0.2200</td><td class="mono">$0.6600</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="deepseek-v4-pro"><td class="model"><code>DeepSeek V4 Pro (New)</code></td><td class="mono">$0.6600</td><td class="mono">$1.9800</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="glm-5"><td class="model"><code>GLM-5</code></td><td class="mono">$1.0000</td><td class="mono">$3.2000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="glm-5.1"><td class="model"><code>GLM-5.1</code></td><td class="mono">$1.4000</td><td class="mono">$4.4000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="glm-5.2"><td class="model"><code>GLM-5.2</code></td><td class="mono">$1.4000</td><td class="mono">$4.4000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="glm-5.3"><td class="model"><code>GLM-5.3</code></td><td class="mono">$1.4000</td><td class="mono">$4.4000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="glm-5.3-flash"><td class="model"><code>GLM-5.3-Flash (2x usage)</code></td><td class="mono">$0.0750</td><td class="mono">$0.2500</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="gpt-5.6-luna"><td class="model"><code>GPT-5.6 Luna</code></td><td class="mono">$0.2000</td><td class="mono">$1.2000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="grok-4.5"><td class="model"><code>Grok 4.5</code></td><td class="mono">$2.0000</td><td class="mono">$6.0000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="grok-4.6"><td class="model"><code>Grok 4.6</code></td><td class="mono">$2.0000</td><td class="mono">$6.0000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="hy3"><td class="model"><code>Hy3</code></td><td class="mono">$0.1400</td><td class="mono">$0.5800</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="hy4-preview"><td class="model"><code>Hy4 preview</code></td><td class="mono">$0.8340</td><td class="mono">$2.5010</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="kimi-k2.5"><td class="model"><code>Kimi K2.5</code></td><td class="mono">$0.6000</td><td class="mono">$3.0000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="kimi-k2.6"><td class="model"><code>Kimi K2.6</code></td><td class="mono">$0.9500</td><td class="mono">$4.0000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="kimi-k2.7-code"><td class="model"><code>Kimi K2.7 Code</code></td><td class="mono">$0.9500</td><td class="mono">$4.0000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="kimi-k3"><td class="model"><code>Kimi K3</code></td><td class="mono">$3.0000</td><td class="mono">$15.0000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="longcat-2.0"><td class="model"><code>LongCat-2.0</code></td><td class="mono">$0.3000</td><td class="mono">$1.2000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="mimo-v2-omni"><td class="model"><code>MiMo V2 Omni</code></td><td class="mono">$0.4000</td><td class="mono">$2.0000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="mimo-v2-pro"><td class="model"><code>MiMo V2 Pro</code></td><td class="mono">$1.0000</td><td class="mono">$3.0000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="mimo-v2.5"><td class="model"><code>MiMo V2.5</code></td><td class="mono">$0.1400</td><td class="mono">$0.2800</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="mimo-v2.5-pro"><td class="model"><code>MiMo V2.5 Pro</code></td><td class="mono">$0.4350</td><td class="mono">$0.8700</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="minimax-m2.5"><td class="model"><code>MiniMax-M2.5</code></td><td class="mono">$0.3000</td><td class="mono">$1.2000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="minimax-m2.7"><td class="model"><code>MiniMax-M2.7</code></td><td class="mono">$0.3000</td><td class="mono">$1.2000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="minimax-m3"><td class="model"><code>MiniMax-M3</code></td><td class="mono">$0.3000</td><td class="mono">$1.2000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="muse-spark-1.2-contributor"><td class="model"><code>Muse Spark 1.2 Contributor</code></td><td class="mono">$0.1000</td><td class="mono">$0.2000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="muse-spark-1.3-contributor"><td class="model"><code>Muse Spark 1.3 Contributor</code></td><td class="mono">$0.1000</td><td class="mono">$0.2000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="omen-alpha"><td class="model"><code>Omen Alpha</code></td><td class="mono">$0.2000</td><td class="mono">$0.6600</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="ox-alpha-free"><td class="model"><code>Ox Alpha Free (Unlimited)</code></td><td class="mono">$0.0000</td><td class="mono">$0.0000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="qwen3.5-plus"><td class="model"><code>Qwen3.5 Plus</code></td><td class="mono">$0.2000</td><td class="mono">$1.2000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="qwen3.6-plus"><td class="model"><code>Qwen3.6 Plus</code></td><td class="mono">$0.5000</td><td class="mono">$3.0000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="qwen3.7-max"><td class="model"><code>Qwen3.7 Max</code></td><td class="mono">$2.5000</td><td class="mono">$7.5000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="qwen3.7-plus"><td class="model"><code>Qwen3.7 Plus</code></td><td class="mono">$0.4000</td><td class="mono">$1.6000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="qwen3.8-flash"><td class="model"><code>Qwen3.8 Flash</code></td><td class="mono">$0.1500</td><td class="mono">$0.4700</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+<tr data-id="qwen3.8-max"><td class="model"><code>Qwen3.8 Max</code></td><td class="mono">$2.0000</td><td class="mono">$6.0000</td><td class="spark">▄▄▄▄▄ <span class="muted">(5)</span></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="events">
+  <h2>Changelog events</h2>
+  <table>
+    <thead>
+      <tr><th>Timestamp</th><th>Level</th><th>Title</th><th>Message</th></tr>
+    </thead>
+    <tbody>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:55.261Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: ling-3.0-tiny-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:55.232Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: qwen3.6-plus-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:53.505Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: mimo-v2-pro-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:51.946Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: mimo-v2-omni-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:51.288Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: minimax-m2.5-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:49.893Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: mimo-v2-flash-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:49.867Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: glm-5-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:49.394Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: glm-4.7-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:49.068Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: trinity-large-preview-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:48.693Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: ling-3.0-flash-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:48.453Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: ling-3.0-flash-fin-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:48.160Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: big-pickle</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:48.047Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: nemotron-3-super-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:47.434Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: mimo-v2.5-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:46.820Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: ring-2.6-1t-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:46.640Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: kimi-k2.5-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:46.238Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: hy3-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:45.658Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: nemotron-3.5-lightning-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:45.576Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: ling-2.6-flash-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:45.263Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: x-preview-f-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:45.026Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: muse-spark-1.2-contributor-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:44.955Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: minimax-m3-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:44.856Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: laguna-s-2.1-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:44.670Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: deepseek-v4-flash-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:44.514Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: longcat-2.0-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:44.366Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: minimax-m2.1-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:44.188Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: north-mini-code-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:44.155Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: muse-spark-1.3-contributor-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:44.080Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: grok-code</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:44.037Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: hy3-preview-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T11:27:43.902Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Free model available: nemotron-3-ultra-free</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T09:28:26.297Z</td><td class="lvl">model_change</td><td>Feed update: releases</td><td>v1.18.29 — https://github.com/anomalyco/opencode/releases/tag/v1.18.29</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T02:07:36.373Z</td><td class="lvl">model_change</td><td>Feed update: zenPricing</td><td>zen: add muse spark — https://github.com/anomalyco/opencode/commit/7774580e61a26752306c8bd7ff34591dc966e743</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T02:07:36.370Z</td><td class="lvl">model_change</td><td>Feed update: zenPricing</td><td>update zen models — https://github.com/anomalyco/opencode/commit/e8548ae8b2f93c49379be3c48a95330f9e77fdfe</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T02:07:36.368Z</td><td class="lvl">model_change</td><td>Feed update: zenPricing</td><td>chore: generate — https://github.com/anomalyco/opencode/commit/79903a4cf77a411d57f064a17a66cb02d927774d</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T02:07:36.362Z</td><td class="lvl">model_change</td><td>Feed update: zenPricing</td><td>update zen docs — https://github.com/anomalyco/opencode/commit/4db1eec32137d4c8790dd3171e24dbc4beabc236</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-05T02:07:36.241Z</td><td class="lvl">model_change</td><td>Feed update: zenPricing</td><td>Merge branch &amp;#39;dev&amp;#39; of github.com:anomalyco/opencode into dev — https://github.com/anomalyco/opencode/commit/70b4ca8c181e4c1ac6d8993b86249d824487ec65</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-04T22:47:51.941Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Removed model: old-model</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-04T22:47:51.932Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Added model: hy4-preview</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-04T22:47:51.929Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Cost changed for hy3: {&quot;input&quot;:0.0175,&quot;output&quot;:0.0725,&quot;cache_read&quot;:0.004375} -&gt; {&quot;input&quot;:0.14,&quot;output&quot;:0.58,&quot;cache_read&quot;:0.035}</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-04T22:47:16.734Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Removed model: old-model</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-04T22:47:16.731Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Added model: hy4-preview</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-04T22:47:16.725Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Cost changed for hy3: {&quot;input&quot;:0.0175,&quot;output&quot;:0.0725,&quot;cache_read&quot;:0.004375} -&gt; {&quot;input&quot;:0.14,&quot;output&quot;:0.58,&quot;cache_read&quot;:0.035}</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-04T20:24:17.899Z</td><td class="lvl">model_change</td><td>Added model: qwen3.8-flash</td><td>New model available in catalog</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-04T19:19:24.843Z</td><td class="lvl">model_change</td><td>Feed update: releases</td><td>v1.18.28 — https://github.com/anomalyco/opencode/releases/tag/v1.18.28</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-04T13:51:38.177Z</td><td class="lvl">model_change</td><td>Feed update: goPricing</td><td>fix(go): align Ox Alpha model ID (#43837) — https://github.com/anomalyco/opencode/commit/ba72a6ff2b62aaf614b8e745193e86a51be6142c</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-04T13:51:38.175Z</td><td class="lvl">model_change</td><td>Feed update: goPricing</td><td>docs(go): add DeepSeek vision model (#43866) — https://github.com/anomalyco/opencode/commit/813e6f3cec1bfb2cec4f50ca6cb19e225e747e95</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-04T13:51:38.172Z</td><td class="lvl">model_change</td><td>Feed update: goPricing</td><td>chore: generate — https://github.com/anomalyco/opencode/commit/fa8f17014c97913b2200aa642f0ab75f0bff9cb8</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-04T13:51:38.171Z</td><td class="lvl">model_change</td><td>Feed update: goPricing</td><td>discontinue first month discount — https://github.com/anomalyco/opencode/commit/4dbeeddc77e657d5b8fb0aef3efc9c067c1e5b3f</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-04T13:51:38.170Z</td><td class="lvl">model_change</td><td>Feed update: goPricing</td><td>docs(go): renew DeepSeek ZDR through September 2026 (#47288) — https://github.com/anomalyco/opencode/commit/20a77438762cba25f428871dcc17ac18337a4099</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-04T06:34:59.965Z</td><td class="lvl">model_change</td><td>Feed update: goPricing</td><td>docs(go): clarify DeepSeek weekend pricing (#44637) — https://github.com/anomalyco/opencode/commit/03521003fafdc6d340de6a36a189e3c121b07d40</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-04T06:34:59.965Z</td><td class="lvl">model_change</td><td>Feed update: goPricing</td><td>docs(go): add LongCat-2.0 (#44636) — https://github.com/anomalyco/opencode/commit/6bb772215b08b4b7d9243c27286950d85b9f678d</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-04T06:34:59.964Z</td><td class="lvl">model_change</td><td>Feed update: goPricing</td><td>docs(go): add Grok 4.6 (#45042) — https://github.com/anomalyco/opencode/commit/ac1c048e6420eb4c728fd3e343a1ba7b076cba92</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-04T06:34:59.963Z</td><td class="lvl">model_change</td><td>Feed update: goPricing</td><td>docs(go): add Omen Alpha (#47220) — https://github.com/anomalyco/opencode/commit/8b9f89e7e8011dfe5b1350c92a6311e39b39d723</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-04T06:34:59.890Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Added model: omen-alpha</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-03T15:34:54.315Z</td><td class="lvl">model_change</td><td>Feed update: goPricing</td><td>docs: remove Ox Alpha Free (#45221) — https://github.com/anomalyco/opencode/commit/ec25388937666a71fcf8715020fe4be678843a2b</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-03T15:34:54.306Z</td><td class="lvl">model_change</td><td>Feed update: goPricing</td><td>chore: generate — https://github.com/anomalyco/opencode/commit/1216c550944de69f73732a907deabcfd5f477cdb</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-03T15:34:54.305Z</td><td class="lvl">model_change</td><td>Feed update: goPricing</td><td>docs(web): translate Go usage requirements (#47057) — https://github.com/anomalyco/opencode/commit/79d503150ca22f151afe4ea543fac8a8eb8aef53</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-03T11:55:39.777Z</td><td class="lvl">model_change</td><td>Feed update: releases</td><td>v1.18.27 — https://github.com/anomalyco/opencode/releases/tag/v1.18.27</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-02T18:36:51.337Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Added model: muse-spark-1.3-contributor</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-02T16:34:57.291Z</td><td class="lvl">model_change</td><td>Feed update: goPricing</td><td>docs(go): add GLM-5.3-Flash (#45269) — https://github.com/anomalyco/opencode/commit/830aaf2059e87eab3105dda4c19556206d60c443</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-02T16:34:57.277Z</td><td class="lvl">model_change</td><td>Feed update: goPricing</td><td>feat(console): add Muse Spark 1.3 and Gemini 3.8 Flash (#46836) — https://github.com/anomalyco/opencode/commit/77aec36da1a5fcd0e652f45aec2db49cbf1081f4</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-02T16:34:57.261Z</td><td class="lvl">model_change</td><td>Feed update: zenPricing</td><td>feat(console): add Muse Spark 1.3 and Gemini 3.8 Flash (#46836) — https://github.com/anomalyco/opencode/commit/77aec36da1a5fcd0e652f45aec2db49cbf1081f4</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-02T11:29:27.471Z</td><td class="lvl">model_change</td><td>Feed update: releases</td><td>v1.18.26 — https://github.com/anomalyco/opencode/releases/tag/v1.18.26</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-02T05:25:37.810Z</td><td class="lvl">model_change</td><td>Feed update: zenPricing</td><td>docs(zen): add Claude Fable 5.1 (#46728) — https://github.com/anomalyco/opencode/commit/82b665075b0c89e36938931087920e1b36b1c49e</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-01T08:33:09.574Z</td><td class="lvl">model_change</td><td>Feed update: goPricing</td><td>docs(web): update Qwen3.7 Max Go usage (#46555) — https://github.com/anomalyco/opencode/commit/ebece6efd7b11401cf1e7390b5a22991b6608cc4</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-01T03:44:39.443Z</td><td class="lvl">model_change</td><td>Feed update: goPricing</td><td>docs on proper usage of OpenCode Go — https://github.com/anomalyco/opencode/commit/ba790579eab13db3bd5404f9ca5a8d3f424478fa</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-01T03:44:39.442Z</td><td class="lvl">model_change</td><td>Feed update: goPricing</td><td>chore: generate — https://github.com/anomalyco/opencode/commit/2386fcec753c49c55c8df026edde8e822c924925</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-09-01T03:44:39.440Z</td><td class="lvl">model_change</td><td>Feed update: goPricing</td><td>fix(web): number Go usage requirements — https://github.com/anomalyco/opencode/commit/1ead9e3d7f02661176fd46d7bcac7f6b7be3b52d</td></tr>
+<tr class="lvl-model_change"><td class="mono">2026-08-30T03:26:56.450Z</td><td class="lvl">model_change</td><td>Model changed</td><td>Cost changed for hy3: {&quot;input&quot;:0.0175,&quot;output&quot;:0.0725,&quot;cache_read&quot;:0.004375} -&gt; {&quot;input&quot;:0.14,&quot;output&quot;:0.58,&quot;cache_read&quot;:0.035}</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer>Static view — open directly from disk (file://). Regenerate with <code>npm run history:html</code>.</footer>
+
+<script>
+  (function () {
+    var f = document.getElementById('filter');
+    if (!f) return;
+    f.addEventListener('input', function () {
+      var q = f.value.trim().toLowerCase();
+      var rows = document.querySelectorAll('#compare tbody tr');
+      for (var i = 0; i < rows.length; i++) {
+        var id = rows[i].getAttribute('data-id') || '';
+        var text = rows[i].textContent.toLowerCase();
+        var match = !q || id.toLowerCase().indexOf(q) !== -1 || text.indexOf(q) !== -1;
+        rows[i].classList.toggle('hidden', !match);
+      }
+    });
+  })();
+</script>
+</body>
+</html>

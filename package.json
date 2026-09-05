@@ -11,6 +11,7 @@
     "report": "node src/report-cli.js",
     "report:history": "node src/report-cli.js --history",
     "history:html": "node src/history-view.js",
+    "publish:snapshot": "node scripts/publish-snapshot.js",
     "calc": "node src/calc.js",
     "add-webhook": "node scripts/add-webhook.js"
   },

@@ -1,0 +1,422 @@
+[
+  {
+    "ts": "2026-08-30T03:26:56.450Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Cost changed for hy3: {\"input\":0.0175,\"output\":0.0725,\"cache_read\":0.004375} -> {\"input\":0.14,\"output\":0.58,\"cache_read\":0.035}"
+  },
+  {
+    "ts": "2026-09-01T03:44:39.440Z",
+    "level": "model_change",
+    "title": "Feed update: goPricing",
+    "message": "fix(web): number Go usage requirements — https://github.com/anomalyco/opencode/commit/1ead9e3d7f02661176fd46d7bcac7f6b7be3b52d"
+  },
+  {
+    "ts": "2026-09-01T03:44:39.442Z",
+    "level": "model_change",
+    "title": "Feed update: goPricing",
+    "message": "chore: generate — https://github.com/anomalyco/opencode/commit/2386fcec753c49c55c8df026edde8e822c924925"
+  },
+  {
+    "ts": "2026-09-01T03:44:39.443Z",
+    "level": "model_change",
+    "title": "Feed update: goPricing",
+    "message": "docs on proper usage of OpenCode Go — https://github.com/anomalyco/opencode/commit/ba790579eab13db3bd5404f9ca5a8d3f424478fa"
+  },
+  {
+    "ts": "2026-09-01T08:33:09.574Z",
+    "level": "model_change",
+    "title": "Feed update: goPricing",
+    "message": "docs(web): update Qwen3.7 Max Go usage (#46555) — https://github.com/anomalyco/opencode/commit/ebece6efd7b11401cf1e7390b5a22991b6608cc4"
+  },
+  {
+    "ts": "2026-09-02T05:25:37.810Z",
+    "level": "model_change",
+    "title": "Feed update: zenPricing",
+    "message": "docs(zen): add Claude Fable 5.1 (#46728) — https://github.com/anomalyco/opencode/commit/82b665075b0c89e36938931087920e1b36b1c49e"
+  },
+  {
+    "ts": "2026-09-02T11:29:27.471Z",
+    "level": "model_change",
+    "title": "Feed update: releases",
+    "message": "v1.18.26 — https://github.com/anomalyco/opencode/releases/tag/v1.18.26"
+  },
+  {
+    "ts": "2026-09-02T16:34:57.261Z",
+    "level": "model_change",
+    "title": "Feed update: zenPricing",
+    "message": "feat(console): add Muse Spark 1.3 and Gemini 3.8 Flash (#46836) — https://github.com/anomalyco/opencode/commit/77aec36da1a5fcd0e652f45aec2db49cbf1081f4"
+  },
+  {
+    "ts": "2026-09-02T16:34:57.277Z",
+    "level": "model_change",
+    "title": "Feed update: goPricing",
+    "message": "feat(console): add Muse Spark 1.3 and Gemini 3.8 Flash (#46836) — https://github.com/anomalyco/opencode/commit/77aec36da1a5fcd0e652f45aec2db49cbf1081f4"
+  },
+  {
+    "ts": "2026-09-02T16:34:57.291Z",
+    "level": "model_change",
+    "title": "Feed update: goPricing",
+    "message": "docs(go): add GLM-5.3-Flash (#45269) — https://github.com/anomalyco/opencode/commit/830aaf2059e87eab3105dda4c19556206d60c443"
+  },
+  {
+    "ts": "2026-09-02T18:36:51.337Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Added model: muse-spark-1.3-contributor"
+  },
+  {
+    "ts": "2026-09-03T11:55:39.777Z",
+    "level": "model_change",
+    "title": "Feed update: releases",
+    "message": "v1.18.27 — https://github.com/anomalyco/opencode/releases/tag/v1.18.27"
+  },
+  {
+    "ts": "2026-09-03T15:34:54.305Z",
+    "level": "model_change",
+    "title": "Feed update: goPricing",
+    "message": "docs(web): translate Go usage requirements (#47057) — https://github.com/anomalyco/opencode/commit/79d503150ca22f151afe4ea543fac8a8eb8aef53"
+  },
+  {
+    "ts": "2026-09-03T15:34:54.306Z",
+    "level": "model_change",
+    "title": "Feed update: goPricing",
+    "message": "chore: generate — https://github.com/anomalyco/opencode/commit/1216c550944de69f73732a907deabcfd5f477cdb"
+  },
+  {
+    "ts": "2026-09-03T15:34:54.315Z",
+    "level": "model_change",
+    "title": "Feed update: goPricing",
+    "message": "docs: remove Ox Alpha Free (#45221) — https://github.com/anomalyco/opencode/commit/ec25388937666a71fcf8715020fe4be678843a2b"
+  },
+  {
+    "ts": "2026-09-04T06:34:59.890Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Added model: omen-alpha"
+  },
+  {
+    "ts": "2026-09-04T06:34:59.963Z",
+    "level": "model_change",
+    "title": "Feed update: goPricing",
+    "message": "docs(go): add Omen Alpha (#47220) — https://github.com/anomalyco/opencode/commit/8b9f89e7e8011dfe5b1350c92a6311e39b39d723"
+  },
+  {
+    "ts": "2026-09-04T06:34:59.964Z",
+    "level": "model_change",
+    "title": "Feed update: goPricing",
+    "message": "docs(go): add Grok 4.6 (#45042) — https://github.com/anomalyco/opencode/commit/ac1c048e6420eb4c728fd3e343a1ba7b076cba92"
+  },
+  {
+    "ts": "2026-09-04T06:34:59.965Z",
+    "level": "model_change",
+    "title": "Feed update: goPricing",
+    "message": "docs(go): add LongCat-2.0 (#44636) — https://github.com/anomalyco/opencode/commit/6bb772215b08b4b7d9243c27286950d85b9f678d"
+  },
+  {
+    "ts": "2026-09-04T06:34:59.965Z",
+    "level": "model_change",
+    "title": "Feed update: goPricing",
+    "message": "docs(go): clarify DeepSeek weekend pricing (#44637) — https://github.com/anomalyco/opencode/commit/03521003fafdc6d340de6a36a189e3c121b07d40"
+  },
+  {
+    "ts": "2026-09-04T13:51:38.170Z",
+    "level": "model_change",
+    "title": "Feed update: goPricing",
+    "message": "docs(go): renew DeepSeek ZDR through September 2026 (#47288) — https://github.com/anomalyco/opencode/commit/20a77438762cba25f428871dcc17ac18337a4099"
+  },
+  {
+    "ts": "2026-09-04T13:51:38.171Z",
+    "level": "model_change",
+    "title": "Feed update: goPricing",
+    "message": "discontinue first month discount — https://github.com/anomalyco/opencode/commit/4dbeeddc77e657d5b8fb0aef3efc9c067c1e5b3f"
+  },
+  {
+    "ts": "2026-09-04T13:51:38.172Z",
+    "level": "model_change",
+    "title": "Feed update: goPricing",
+    "message": "chore: generate — https://github.com/anomalyco/opencode/commit/fa8f17014c97913b2200aa642f0ab75f0bff9cb8"
+  },
+  {
+    "ts": "2026-09-04T13:51:38.175Z",
+    "level": "model_change",
+    "title": "Feed update: goPricing",
+    "message": "docs(go): add DeepSeek vision model (#43866) — https://github.com/anomalyco/opencode/commit/813e6f3cec1bfb2cec4f50ca6cb19e225e747e95"
+  },
+  {
+    "ts": "2026-09-04T13:51:38.177Z",
+    "level": "model_change",
+    "title": "Feed update: goPricing",
+    "message": "fix(go): align Ox Alpha model ID (#43837) — https://github.com/anomalyco/opencode/commit/ba72a6ff2b62aaf614b8e745193e86a51be6142c"
+  },
+  {
+    "ts": "2026-09-04T19:19:24.843Z",
+    "level": "model_change",
+    "title": "Feed update: releases",
+    "message": "v1.18.28 — https://github.com/anomalyco/opencode/releases/tag/v1.18.28"
+  },
+  {
+    "ts": "2026-09-04T20:24:17.899Z",
+    "level": "model_change",
+    "title": "Added model: qwen3.8-flash",
+    "message": "New model available in catalog"
+  },
+  {
+    "ts": "2026-09-04T22:47:16.725Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Cost changed for hy3: {\"input\":0.0175,\"output\":0.0725,\"cache_read\":0.004375} -> {\"input\":0.14,\"output\":0.58,\"cache_read\":0.035}"
+  },
+  {
+    "ts": "2026-09-04T22:47:16.731Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Added model: hy4-preview"
+  },
+  {
+    "ts": "2026-09-04T22:47:16.734Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Removed model: old-model"
+  },
+  {
+    "ts": "2026-09-04T22:47:51.929Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Cost changed for hy3: {\"input\":0.0175,\"output\":0.0725,\"cache_read\":0.004375} -> {\"input\":0.14,\"output\":0.58,\"cache_read\":0.035}"
+  },
+  {
+    "ts": "2026-09-04T22:47:51.932Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Added model: hy4-preview"
+  },
+  {
+    "ts": "2026-09-04T22:47:51.941Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Removed model: old-model"
+  },
+  {
+    "ts": "2026-09-05T02:07:36.241Z",
+    "level": "model_change",
+    "title": "Feed update: zenPricing",
+    "message": "Merge branch &#39;dev&#39; of github.com:anomalyco/opencode into dev — https://github.com/anomalyco/opencode/commit/70b4ca8c181e4c1ac6d8993b86249d824487ec65"
+  },
+  {
+    "ts": "2026-09-05T02:07:36.362Z",
+    "level": "model_change",
+    "title": "Feed update: zenPricing",
+    "message": "update zen docs — https://github.com/anomalyco/opencode/commit/4db1eec32137d4c8790dd3171e24dbc4beabc236"
+  },
+  {
+    "ts": "2026-09-05T02:07:36.368Z",
+    "level": "model_change",
+    "title": "Feed update: zenPricing",
+    "message": "chore: generate — https://github.com/anomalyco/opencode/commit/79903a4cf77a411d57f064a17a66cb02d927774d"
+  },
+  {
+    "ts": "2026-09-05T02:07:36.370Z",
+    "level": "model_change",
+    "title": "Feed update: zenPricing",
+    "message": "update zen models — https://github.com/anomalyco/opencode/commit/e8548ae8b2f93c49379be3c48a95330f9e77fdfe"
+  },
+  {
+    "ts": "2026-09-05T02:07:36.373Z",
+    "level": "model_change",
+    "title": "Feed update: zenPricing",
+    "message": "zen: add muse spark — https://github.com/anomalyco/opencode/commit/7774580e61a26752306c8bd7ff34591dc966e743"
+  },
+  {
+    "ts": "2026-09-05T09:28:26.297Z",
+    "level": "model_change",
+    "title": "Feed update: releases",
+    "message": "v1.18.29 — https://github.com/anomalyco/opencode/releases/tag/v1.18.29"
+  },
+  {
+    "ts": "2026-09-05T11:27:43.902Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: nemotron-3-ultra-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:44.037Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: hy3-preview-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:44.080Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: grok-code"
+  },
+  {
+    "ts": "2026-09-05T11:27:44.155Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: muse-spark-1.3-contributor-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:44.188Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: north-mini-code-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:44.366Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: minimax-m2.1-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:44.514Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: longcat-2.0-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:44.670Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: deepseek-v4-flash-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:44.856Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: laguna-s-2.1-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:44.955Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: minimax-m3-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:45.026Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: muse-spark-1.2-contributor-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:45.263Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: x-preview-f-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:45.576Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: ling-2.6-flash-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:45.658Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: nemotron-3.5-lightning-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:46.238Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: hy3-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:46.640Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: kimi-k2.5-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:46.820Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: ring-2.6-1t-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:47.434Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: mimo-v2.5-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:48.047Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: nemotron-3-super-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:48.160Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: big-pickle"
+  },
+  {
+    "ts": "2026-09-05T11:27:48.453Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: ling-3.0-flash-fin-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:48.693Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: ling-3.0-flash-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:49.068Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: trinity-large-preview-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:49.394Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: glm-4.7-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:49.867Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: glm-5-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:49.893Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: mimo-v2-flash-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:51.288Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: minimax-m2.5-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:51.946Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: mimo-v2-omni-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:53.505Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: mimo-v2-pro-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:55.232Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: qwen3.6-plus-free"
+  },
+  {
+    "ts": "2026-09-05T11:27:55.261Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Free model available: ling-3.0-tiny-free"
+  }
+]
