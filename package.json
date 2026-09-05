@@ -10,6 +10,7 @@
     "monitor:once": "node src/monitor.js --once",
     "report": "node src/report-cli.js",
     "report:history": "node src/report-cli.js --history",
+    "calc": "node src/calc.js",
     "add-webhook": "node scripts/add-webhook.js"
   },
   "keywords": [
