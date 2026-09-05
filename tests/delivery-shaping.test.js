@@ -111,3 +111,34 @@ test('discord-digest chunkText honors the 1900-char cap', () => {
     assert.ok(c.length <= 1900, 'chunk exceeded 1900 chars: ' + c.length);
   }
 });
+
+test('deliverRawContent keeps content short (no content/embed duplication)', async () => {
+  const captured = [];
+  const origFetch = global.fetch;
+  global.fetch = async (url, opts) => {
+    captured.push(JSON.parse(opts.body));
+    return { ok: true };
+  };
+  try {
+    delivery.setSubscribers([
+      { name: 's', levels: ['digest'], webhookUrl: 'https://discord.com/api/webhooks/123/abc' }
+    ]);
+    const full = '**Monitor** 🔴 2 changes · next reset tomorrow\n' +
+      '**What changed**\n' +
+      '• hy3 cost 0.0175→0.14 — model_change\n' +
+      '• Quota monthly warning: 83% used (latest, 2 repeats) — warning';
+    await delivery.sendToSubscribers('digest', full);
+    assert.strictEqual(captured.length, 1, 'one webhook request');
+    const payload = captured[0];
+    assert.ok(payload.content.length > 0, 'content must be non-empty');
+    assert.ok(payload.content.length <= 1900, 'content within Discord cap');
+    assert.strictEqual(payload.embeds[0].description, full, 'embed carries the full content');
+    assert.notStrictEqual(payload.content, payload.embeds[0].description, 'content must not duplicate the full body');
+    assert.ok(payload.content.length < payload.embeds[0].description.length, 'content should be shorter than description');
+    // The short content fallback is the first line only.
+    assert.strictEqual(payload.content, '**Monitor** 🔴 2 changes · next reset tomorrow');
+  } finally {
+    global.fetch = origFetch;
+    delivery.setSubscribers([]);
+  }
+});

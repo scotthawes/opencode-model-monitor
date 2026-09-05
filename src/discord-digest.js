@@ -126,8 +126,8 @@ function describeEvent(ev) {
   return `• ${truncate(desc, 120)} — ${lvl}`;
 }
 
-// Read recent changelog events (7-day window), newest first, capped to last 20
-// for parity with the rendered report. Returns an array of {ts,level,title,message}.
+// Read recent changelog events (7-day window), newest first. Returns an array
+// of {ts,level,title,message}.
 function getEvents(stateDir, now) {
   now = now || Date.now();
   const cutoff = now - CHANGELOG_RETENTION_MS;
@@ -141,7 +141,59 @@ function getEvents(stateDir, now) {
   } catch (_) {
     return [];
   }
-  return arr.slice(-20).reverse();
+  // NOTE: we return the FULL in-window set (no -20 cap here). "What changed"
+  // is sorted model-first and then capped at MAX_EVENTS in buildDigestChunks,
+  // so a model_change that sits beyond the last 20 (but still inside the 7-day
+  // window) is no longer dropped before it can be prioritized.
+  return arr.reverse();
+}
+
+// Recognize a quota-crossing alert (title "Quota <window> warning|critical").
+// Returns the window name (e.g. "monthly") or null. Used to collapse repeats.
+function isQuotaCrossing(ev) {
+  const m = /^Quota (\w+) (warning|critical)$/.exec((ev && ev.title) || '');
+  return m ? m[1] : null;
+}
+
+// Collapse repeated quota-warning/critical crossings for the SAME window into a
+// single "What changed" bullet so a noisy window (crossing back and forth
+// across the 7-day window) can't bury real model_change events. Each window
+// becomes ONE bullet carrying the latest reading + a repeat count, e.g.
+//   "Quota monthly warning: 83% used (latest, N repeats)"
+// Non-quota events are preserved verbatim; model_change events (priority 0)
+// still sort first, so they stay visible. Never throws.
+function collapseQuotaWarnings(events) {
+  // Tally repeats per window across the whole list first, so N is accurate
+  // even when a window's readings are interspersed with other events.
+  const tally = new Map(); // window -> { count, latest }
+  for (const e of events) {
+    const w = isQuotaCrossing(e);
+    if (!w) continue;
+    const entry = tally.get(w) || { count: 0, latest: null };
+    entry.count += 1;
+    if (!entry.latest || Date.parse(e.ts) >= Date.parse(entry.latest.ts)) entry.latest = e;
+    tally.set(w, entry);
+  }
+  const emitted = new Set();
+  const out = [];
+  for (const e of events) {
+    const w = isQuotaCrossing(e);
+    if (!w) {
+      out.push(e);
+      continue;
+    }
+    if (emitted.has(w)) continue; // collapse repeats into the first (latest) bullet
+    emitted.add(w);
+    const info = tally.get(w);
+    if (info && info.count > 1 && info.latest) {
+      const pctMatch = String(info.latest.message || '').match(/^(\d+)%\s+used/);
+      const pct = pctMatch ? pctMatch[1] : '';
+      out.push({ ...info.latest, message: `${pct}% used (latest, ${info.count} repeats)` });
+    } else {
+      out.push(e);
+    }
+  }
+  return out;
 }
 
 // Format a 7-day delta as "(Δ +1/7d)" / "(Δ -3/7d)" / "" when unknown.
@@ -227,6 +279,10 @@ function buildDigestChunks(report, opts) {
     return Date.parse(b.ts) - Date.parse(a.ts);
   });
 
+  // Collapse repeated quota-warning/critical crossings (same window) into one
+  // bullet so they can't bury model_change events (fix 2).
+  const collapsedEvents = collapseQuotaWarnings(sortedEvents);
+
   // Headline window for the TL;DR is monthly (the budget users care about),
   // falling back to the last available window. Projections (warn dates) are only
   // meaningful for the headline window — rolling/weekly reset too often for a
@@ -270,9 +326,11 @@ function buildDigestChunks(report, opts) {
     c1.push('_No discrete changes — quota only._');
   } else {
     c1.push('**What changed**');
-    const shown = sortedEvents.slice(0, MAX_EVENTS);
+    const shown = collapsedEvents.slice(0, MAX_EVENTS);
     for (const ev of shown) c1.push(describeEvent(ev));
-    if (eventCount > MAX_EVENTS) c1.push(`• +${eventCount - MAX_EVENTS} more — see changelog`);
+    if (collapsedEvents.length > MAX_EVENTS) {
+      c1.push(`• +${collapsedEvents.length - MAX_EVENTS} more — see changelog`);
+    }
   }
   const chunk1 = c1.join('\n');
 
