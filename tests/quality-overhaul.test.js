@@ -195,14 +195,17 @@ test('warning alert builds an embed with color, fields, timestamp; content non-e
 // ---------------------------------------------------------------------------
 
 test('humanizeReset renders relative phrasing', () => {
-  const now = Date.now();
-  assert.strictEqual(delivery.humanizeReset(new Date(now - 1000).toISOString()), 'overdue');
-  assert.strictEqual(delivery.humanizeReset('not-a-date'), '?');
-  assert.strictEqual(delivery.humanizeReset(new Date(now + 3600_000).toISOString()), 'today');
-  assert.strictEqual(delivery.humanizeReset(new Date(now + 26 * 3600_000).toISOString()), 'tomorrow');
+  // Fixed reference instant (UTC mid-day) so the test is deterministic regardless
+  // of the wall-clock hour it runs at (a real Date.now() made the +26h case flap
+  // in the last ~2h of the UTC day). 2026-01-15T12:00:00Z -> next day is the 16th.
+  const now = Date.parse('2026-01-15T12:00:00.000Z');
+  assert.strictEqual(delivery.humanizeReset(new Date(now - 1000).toISOString(), now), 'overdue');
+  assert.strictEqual(delivery.humanizeReset('not-a-date', now), '?');
+  assert.strictEqual(delivery.humanizeReset(new Date(now + 3600_000).toISOString(), now), 'today');
+  assert.strictEqual(delivery.humanizeReset(new Date(now + 26 * 3600_000).toISOString(), now), 'tomorrow');
   // +60s margin so sub-ms clock drift between the two Date.now() calls cannot
   // round the 4h remainder down to 3h.
-  assert.strictEqual(delivery.humanizeReset(new Date(now + 3 * 864e5 + 4 * 3600_000 + 60000).toISOString()), 'in 3d 4h');
+  assert.strictEqual(delivery.humanizeReset(new Date(now + 3 * 864e5 + 4 * 3600_000 + 60000).toISOString(), now), 'in 3d 4h');
 });
 
 // ---------------------------------------------------------------------------

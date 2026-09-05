@@ -670,17 +670,17 @@ function debug(message) {
 //   "?"          (unparseable input)
 // Used by report.md + the Discord digest TL;DR so users see "next reset in Xd Yh"
 // instead of a raw ISO string. Never throws.
-function humanizeReset(iso) {
+function humanizeReset(iso, now) {
   const t = Date.parse(iso);
   if (isNaN(t)) return '?';
-  const now = Date.now();
-  const diff = t - now;
+  const nowMs = now != null ? now : Date.now();
+  const diff = t - nowMs;
   if (diff < 0) return 'overdue';
   const DAY = 864e5;
-  const dNow = new Date(now).toISOString().slice(0, 10);
+  const dNow = new Date(nowMs).toISOString().slice(0, 10);
   const dTs = new Date(t).toISOString().slice(0, 10);
   if (dNow === dTs) return 'today';
-  const dTomorrow = new Date(now + DAY).toISOString().slice(0, 10);
+  const dTomorrow = new Date(nowMs + DAY).toISOString().slice(0, 10);
   if (dTs === dTomorrow) return 'tomorrow';
   const days = Math.floor(diff / DAY);
   const hours = Math.floor((diff - days * DAY) / 3600000);

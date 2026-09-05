@@ -12,7 +12,74 @@
     "maintained": true,
     "source": "https://ocgo-pricing.all-the.rest/data/latest.json",
     "seededAt": "2026-09-05T20:48:02.871Z",
-    "note": "Add/override an entry in `models` to pin a model to a non-default cap. Unknown models fall back to the default cap (60 -> 1x effective). Re-run scripts/seed-usage-table.js to refresh from the public source (best-effort)."
+    "note": "Add/override an entry in `models` to pin a model to a non-default cap. Unknown models fall back to the default cap (60 -> 1x effective). Re-run scripts/seed-usage-table.js to refresh from the public source (best-effort).",
+    "capsProvenance": {
+      "omen-alpha": {
+        "cap": 100,
+        "date": "2026-09-04",
+        "source": "ocgo-price-tracker"
+      },
+      "qwen3.7-max": {
+        "cap": 30,
+        "date": "2026-09-01",
+        "source": "ocgo-price-tracker"
+      },
+      "hy3": {
+        "cap": 60,
+        "date": "2026-08-30",
+        "source": "ocgo-price-tracker"
+      },
+      "hy4-preview": {
+        "cap": 30,
+        "date": "2026-08-28",
+        "source": "ocgo-price-tracker"
+      },
+      "qwen3.8-flash": {
+        "cap": 30,
+        "date": "2026-08-28",
+        "source": "ocgo-price-tracker"
+      },
+      "glm-5.3-flash": {
+        "cap": 30,
+        "date": "2026-08-26",
+        "source": "ocgo-price-tracker"
+      },
+      "grok-4.6": {
+        "cap": 15,
+        "date": "2026-08-25",
+        "source": "ocgo-price-tracker"
+      },
+      "grok-4.6-large": {
+        "cap": 15,
+        "date": "2026-08-25",
+        "source": "ocgo-price-tracker"
+      },
+      "longcat-2.0": {
+        "cap": 60,
+        "date": "2026-08-24",
+        "source": "ocgo-price-tracker"
+      },
+      "deepseek-v4-flash-vision-exp": {
+        "cap": 15,
+        "date": "2026-08-21",
+        "source": "ocgo-price-tracker"
+      },
+      "deepseek-v4-flash-vision": {
+        "cap": 15,
+        "date": "2026-08-21",
+        "source": "ocgo-price-tracker"
+      },
+      "muse-spark-1.3-contributor": {
+        "cap": 60,
+        "date": "2026-09-02",
+        "source": "ocgo-price-tracker"
+      },
+      "muse-spark-1.2-contributor": {
+        "cap": 60,
+        "date": "2026-08-20",
+        "source": "ocgo-price-tracker"
+      }
+    }
   },
   "models": {
     "grok-4.6": 15,
@@ -42,6 +109,8 @@
     "deepseek-v4-flash-vision-exp": 15,
     "hy4-preview": 30,
     "hy3": 60,
-    "omen-alpha": 100
+    "omen-alpha": 100,
+    "grok-4.6-large": 15,
+    "deepseek-v4-flash-vision": 15
   }
 }

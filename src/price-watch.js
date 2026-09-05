@@ -168,6 +168,51 @@ function extractModelMeta(m) {
   };
 }
 
+// --- Privacy / training-status change detection (v0.11.0, #83) --------------
+//
+// The live opencode-go api.json does NOT carry privacy/training fields today
+// (see extractModelMeta). Privacy + ZDR training-status milestones therefore
+// originate from the external seed (log-only, see scripts/seed-external-changelog.js).
+// These functions make price-watch ready to surface them IF api.json ever grows
+// a `privacy` block: we detect moves and emit a `privacy-changed` event + a
+// non-fatal model_change line. When the source lacks the field (today), the path
+// is a silent no-op. Best-effort and fully non-blocking.
+function extractPrivacy(m) {
+  m = m || {};
+  const p = m.privacy && typeof m.privacy === 'object' ? m.privacy : null;
+  if (!p) return null;
+  const training = p.training != null ? String(p.training) : null;
+  const zdrValidUntil = p.zdrValidUntil != null ? String(p.zdrValidUntil) : null;
+  if (training == null && zdrValidUntil == null) return null;
+  return { training, zdrValidUntil };
+}
+
+// Pure: return a privacy-change descriptor (or null when unchanged) for a model.
+function detectPrivacyChanges(model, prevP, currP) {
+  const a = prevP || null;
+  const b = currP || null;
+  if (JSON.stringify(a) === JSON.stringify(b)) return null;
+  return { model, old: a, new: b };
+}
+
+// Pure: human-readable free-model availability duration. Used on removal to record
+// how long a free model was available (e.g. "19 days", "5 days", "3 hours").
+function formatFreeDuration(ms) {
+  if (!isFinite(ms) || ms < 0) ms = 0;
+  const DAY = 86400000;
+  if (ms >= DAY) {
+    const days = Math.floor(ms / DAY);
+    return days + (days === 1 ? ' day' : ' days');
+  }
+  const HR = 3600000;
+  if (ms >= HR) {
+    const hr = Math.floor(ms / HR);
+    return hr + (hr === 1 ? ' hour' : ' hours');
+  }
+  const min = Math.max(1, Math.floor(ms / 60000));
+  return min + (min === 1 ? ' minute' : ' minutes');
+}
+
 // A model is "free" when its id ends in `-free`/`:free` (the opencode Zen
 // naming convention) or its cost is explicitly zero. Used by the additive
 // Zen free-model track (P1-2, #51) so free models are announced but never
@@ -370,7 +415,10 @@ async function runPriceWatch(stateDir) {
       cost: m.cost || null,
       tiers: m.tiers || null,
       meta: extractModelMeta(m),
-      usage: typeof m.usage === 'number' && isFinite(m.usage) && m.usage > 0 ? m.usage : null
+      usage: typeof m.usage === 'number' && isFinite(m.usage) && m.usage > 0 ? m.usage : null,
+      // Raw privacy block (if api.json ever carries one) — surfaced by the
+      // privacy-change detector below; null when absent (today).
+      privacy: extractPrivacy(m)
     };
   }
 
@@ -383,16 +431,8 @@ async function runPriceWatch(stateDir) {
   // diff is never affected and free models are never overstated as cost. Free
   // models are flagged here (not in the opencode-go loop) so a model cannot be
   // double-counted as both billable and free.
-  const zen = (data && data['opencode']) || null;
-  const zenModelsRaw = (zen && zen.models) || {};
-  const freeModels = {};
-  for (const id of Object.keys(zenModelsRaw)) {
-    const m = zenModelsRaw[id] || {};
-    if (isFreeModel(id, m)) {
-      freeModels[id] = { cost: m.cost || null, tiers: m.tiers || null, meta: extractModelMeta(m) };
-    }
-  }
-
+  // Read the prior snapshot BEFORE building the free-model map so the map can
+  // preserve each free model's first-seen time (used for available-duration).
   let prev = {};
   let prevValid = true;
   let snapExisted = false;
@@ -419,6 +459,31 @@ async function runPriceWatch(stateDir) {
       ? prev.freeModels
       : {};
   if (prev && typeof prev === 'object' && prev.freeModels != null) delete prev.freeModels;
+  // Strip the prior privacy map too (it is not a billable model entry).
+  if (prev && typeof prev === 'object' && prev.modelPrivacy != null) delete prev.modelPrivacy;
+
+  const zen = (data && data['opencode']) || null;
+  const zenModelsRaw = (zen && zen.models) || {};
+  const freeNowIso = new Date().toISOString();
+  const freeModels = {};
+  for (const id of Object.keys(zenModelsRaw)) {
+    const m = zenModelsRaw[id] || {};
+    if (isFreeModel(id, m)) {
+      // Preserve the first-seen time across runs so a later removal can report
+      // how long the free model was available (formatFreeDuration). Derived
+      // straight from the prior snapshot here to avoid a TDZ on `prevFree`.
+      const priorAdded =
+        prevValid && prev && prev.freeModels && prev.freeModels[id] && prev.freeModels[id].addedAt
+          ? prev.freeModels[id].addedAt
+          : null;
+      freeModels[id] = {
+        cost: m.cost || null,
+        tiers: m.tiers || null,
+        meta: extractModelMeta(m),
+        addedAt: priorAdded || freeNowIso
+      };
+    }
+  }
 
   const prevIds = prevValid ? new Set(Object.keys(prev)) : new Set();
   const newIds = new Set(Object.keys(modelsMap));
@@ -500,7 +565,8 @@ async function runPriceWatch(stateDir) {
           reason: 'available',
           model: id,
           cost: (freeModels[id] || {}).cost || null,
-          meta: (freeModels[id] || {}).meta || null
+          meta: (freeModels[id] || {}).meta || null,
+          availableFrom: (freeModels[id] || {}).addedAt || freeNowIso
         });
       } else {
         const a = prevFree[id] || {};
@@ -511,19 +577,24 @@ async function runPriceWatch(stateDir) {
             reason: 'changed',
             model: id,
             cost: b.cost || null,
-            meta: (freeModels[id] || {}).meta || null
+            meta: (freeModels[id] || {}).meta || null,
+            availableFrom: (freeModels[id] || {}).addedAt || freeNowIso
           });
         }
       }
     }
     for (const id of prevFreeIds) {
       if (!newFreeIds.has(id)) {
+        const addedAt = prevFree[id] && prevFree[id].addedAt ? Date.parse(prevFree[id].addedAt) : null;
+        const duration = addedAt && !isNaN(addedAt) ? formatFreeDuration(Date.now() - addedAt) : null;
         freeChanges.push({
           subtype: 'free',
           reason: 'removed',
           model: id,
           cost: (prevFree[id] || {}).cost || null,
-          meta: (prevFree[id] || {}).meta || null
+          meta: (prevFree[id] || {}).meta || null,
+          availableFrom: prevFree[id] && prevFree[id].addedAt ? prevFree[id].addedAt : null,
+          duration
         });
       }
     }
@@ -533,6 +604,31 @@ async function runPriceWatch(stateDir) {
     else if (fc.reason === 'changed') changes.push(`Free model changed: ${fc.model}`);
     else changes.push(`Free model available: ${fc.model}`);
     modelChanges.push(fc);
+  }
+
+  // --- Privacy / training-status change detection (v0.11.0, #83) ------------
+  // Dormant unless api.json carries a `privacy` block (it does not today), so
+  // this is a no-op in production. If/when it appears, we log a privacy-changed
+  // event + a non-fatal model_change line. Privacy milestones otherwise come
+  // from the external seed (log-only, scripts/seed-external-changelog.js).
+  const modelPrivacyMap = {};
+  if (prevValid) {
+    for (const id of newIds) {
+      const curr = (modelsMap[id] || {}).privacy || null;
+      const prevP = (prev.modelPrivacy && prev.modelPrivacy[id]) || null;
+      modelPrivacyMap[id] = curr;
+      const ch = detectPrivacyChanges(id, prevP, curr);
+      if (ch) {
+        changes.push(`Privacy changed for ${id}: ${JSON.stringify(ch.old)} -> ${JSON.stringify(ch.new)}`);
+        events.appendEvent(stateDir, {
+          ts: new Date().toISOString(),
+          type: 'privacy-changed',
+          model: id,
+          old: ch.old,
+          new: ch.new
+        });
+      }
+    }
   }
 
   // --- Quota / usage-cap change detection (v0.10.0, #77) -----------------------
@@ -560,6 +656,7 @@ async function runPriceWatch(stateDir) {
     // never perturbed by its presence here.
     const snapshot = Object.assign({}, modelsMap);
     snapshot.freeModels = freeModels;
+    snapshot.modelPrivacy = modelPrivacyMap;
     fs.writeFileSync(snapFile, JSON.stringify(snapshot, null, 2));
     if (newEtag) fs.writeFileSync(etagFile, newEtag);
   } catch (e) {
@@ -620,7 +717,7 @@ function isValidSnapshot(obj) {
   });
 }
 
-module.exports = { runPriceWatch, appendPriceHistory, extractModelMeta, isFreeModel, validateApiShape, computeCapChanges, readPrevCaps, writeCurrentCaps, detectCapChanges };
+module.exports = { runPriceWatch, appendPriceHistory, extractModelMeta, isFreeModel, validateApiShape, computeCapChanges, readPrevCaps, writeCurrentCaps, detectCapChanges, extractPrivacy, detectPrivacyChanges, formatFreeDuration };
 
 // Human-readable single line for a cap change (used in the report's "Changes
 // detected" list and as the model_change changelog message so the digest can
