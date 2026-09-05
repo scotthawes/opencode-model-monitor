@@ -300,8 +300,11 @@ function usageTableCap(id) {
   return usageTable.getUsageCap(id, usageTable.silentLog);
 }
 
-// Default 7-day window used for the page's deltas + graph X axis.
-const PAGE_WINDOW_DAYS = 7;
+// Default 30-day window used for the page's deltas + graph X axis. 30d (not 7d)
+// so historic jumps that predate the live history.json sample store — e.g. the
+// hy3 8× change on 2026-08-30, reconstructed by scripts/backfill-history.js —
+// remain visible inside the window (Closes #81).
+const PAGE_WINDOW_DAYS = 30;
 
 function numOrNull(v) {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
