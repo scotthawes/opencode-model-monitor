@@ -459,7 +459,15 @@ async function runPriceWatch(stateDir) {
       ? prev.freeModels
       : {};
   if (prev && typeof prev === 'object' && prev.freeModels != null) delete prev.freeModels;
-  // Strip the prior privacy map too (it is not a billable model entry).
+  // Capture the prior privacy map BEFORE stripping it (mirrors prevFree above).
+  // If we delete it first, the privacy diff below reads a null baseline and
+  // re-emits "Privacy changed for X" every cycle (BUG #85: privacy redup). Keep
+  // the map for the comparison, but remove it from `prev` so it is never mistaken
+  // for a billable opencode-go model entry.
+  const prevPrivacy =
+    prevValid && prev && typeof prev === 'object' && prev.modelPrivacy && typeof prev.modelPrivacy === 'object'
+      ? prev.modelPrivacy
+      : {};
   if (prev && typeof prev === 'object' && prev.modelPrivacy != null) delete prev.modelPrivacy;
 
   const zen = (data && data['opencode']) || null;
@@ -615,7 +623,7 @@ async function runPriceWatch(stateDir) {
   if (prevValid) {
     for (const id of newIds) {
       const curr = (modelsMap[id] || {}).privacy || null;
-      const prevP = (prev.modelPrivacy && prev.modelPrivacy[id]) || null;
+      const prevP = (prevPrivacy && prevPrivacy[id]) || null;
       modelPrivacyMap[id] = curr;
       const ch = detectPrivacyChanges(id, prevP, curr);
       if (ch) {
@@ -641,13 +649,14 @@ async function runPriceWatch(stateDir) {
   const capChanges = detectCapChanges(stateDir, modelsMap);
   for (const c of capChanges) changes.push(capChangeText(c));
 
-  // v0.8.0 (#73): event-sourced history. Dual-write every detected model change
-  // to the append-only JSONL event log (source of truth). changelog.json is still
-  // written by delivery for backward compatibility. Best-effort: a failed append
-  // never affects the rest of the price-watch cycle.
-  if (modelChanges.length) {
-    events.appendChanges(stateDir, modelChanges);
-  }
+  // v0.8.0 (#73): event-sourced history. Every detected model change is written
+  // to the append-only JSONL event log EXACTLY ONCE, inside
+  // delivery.deliverModelChangeTable (the table path, delivery.js:1511). The prior
+  // dual-write from here is removed: two writes with different ts defeated the
+  // in-process sig-dedup and doubled every cost/added/removed/tiers event
+  // (BUG #85: event double-write). changelog.json is still written by delivery for
+  // backward compatibility. Best-effort: a failed append never affects the rest of
+  // the price-watch cycle.
 
   try {
     // Persist opencode-go models plus the independent free-model list. The
