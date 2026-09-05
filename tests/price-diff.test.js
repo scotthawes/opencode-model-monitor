@@ -37,6 +37,17 @@ function mockFetch(catalog) {
   });
 }
 
+// Like mockFetch but also serves a `opencode` (Zen) catalog so the additive
+// free-model track (P1-2, #51) can be exercised.
+function mockFetchWithZen(goCatalog, zenCatalog) {
+  global.fetch = async () => ({
+    status: 200,
+    ok: true,
+    headers: { get: () => null },
+    json: async () => ({ 'opencode-go': { models: goCatalog }, 'opencode': { models: zenCatalog || {} } })
+  });
+}
+
 function writeSnapshot(d, models) {
   fs.writeFileSync(
     path.join(d, 'pricing-snapshot.json'),
@@ -230,5 +241,107 @@ test('extractModelMeta maps api.json fields and degrades to nulls', () => {
   // Provider id without npm still captured if a string/object id is present.
   const pid = extractModelMeta({ provider: { id: 'openai' } });
   assert.strictEqual(pid.provider, 'openai');
+});
+
+// --- P1-2: free Zen-model detection + announce (#51) -----------------------
+//
+// Free models are tracked under the `opencode` (Zen) key and reported in their
+// own snapshot list (`freeModels`) without touching the billable cost/tiers diff.
+
+test('free Zen model is detected and announced on add', async () => {
+  const d = tmpDir();
+  try {
+    setup(d);
+    writeSnapshot(d, { a: mk({ input: 1 }) });
+    mockFetchWithZen({ a: mk({ input: 1 }) }, { 'zenmodel-free': mk({ input: 0 }) });
+    const r = await runPriceWatch(d);
+    assert.ok(
+      r.freeModels.includes('zenmodel-free'),
+      'expected zenmodel-free in freeModels, got: ' + JSON.stringify(r.freeModels)
+    );
+    assert.ok(
+      r.changes.some((c) => c.includes('Free model available: zenmodel-free')),
+      'expected a "Free model available: zenmodel-free" change, got: ' + JSON.stringify(r.changes)
+    );
+    // The billable diff must remain untouched (a is unchanged).
+    assert.strictEqual(r.changes.some((c) => c.includes('Added model: a')), false, 'a should not be reported added');
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('free Zen model change is announced when its cost definition changes', async () => {
+  const d = tmpDir();
+  try {
+    setup(d);
+    writeSnapshot(d, { a: mk({ input: 1 }), freeModels: { 'zenmodel-free': { cost: { input: 0 } } } });
+    // Cost moved from {input:0} -> {input:1} but the id still ends in -free, so it
+    // stays free yet is flagged as a change.
+    mockFetchWithZen({ a: mk({ input: 1 }) }, { 'zenmodel-free': mk({ input: 1 }) });
+    const r = await runPriceWatch(d);
+    assert.ok(
+      r.changes.some((c) => c.includes('Free model changed: zenmodel-free')),
+      'expected a "Free model changed: zenmodel-free" change, got: ' + JSON.stringify(r.changes)
+    );
+    assert.ok(r.freeModels.includes('zenmodel-free'), 'zenmodel-free should still be tracked as free');
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('free Zen model removal is announced', async () => {
+  const d = tmpDir();
+  try {
+    setup(d);
+    writeSnapshot(d, { a: mk({ input: 1 }), freeModels: { 'zenmodel-free': { cost: { input: 0 } } } });
+    // Zen catalog no longer lists the free model.
+    mockFetchWithZen({ a: mk({ input: 1 }) }, {});
+    const r = await runPriceWatch(d);
+    assert.ok(
+      r.changes.some((c) => c.includes('Free model removed: zenmodel-free')),
+      'expected a "Free model removed: zenmodel-free" change, got: ' + JSON.stringify(r.changes)
+    );
+    assert.ok(
+      !r.freeModels.includes('zenmodel-free'),
+      'zenmodel-free must not remain in freeModels after removal, got: ' + JSON.stringify(r.freeModels)
+    );
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('paid Zen model is NOT flagged as free (no false positives)', async () => {
+  const d = tmpDir();
+  try {
+    setup(d);
+    writeSnapshot(d, { a: mk({ input: 1 }) });
+    mockFetchWithZen({ a: mk({ input: 1 }) }, { 'zenpaid': mk({ input: 5, output: 9 }) });
+    const r = await runPriceWatch(d);
+    assert.ok(
+      !r.freeModels.includes('zenpaid'),
+      'zenpaid must NOT be flagged free, got: ' + JSON.stringify(r.freeModels)
+    );
+    assert.ok(
+      !r.changes.some((c) => c.toLowerCase().includes('free')),
+      'no free-model change should be emitted for a paid model, got: ' + JSON.stringify(r.changes)
+    );
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('free detection is additive: no Zen key means no free models and no regressions', async () => {
+  const d = tmpDir();
+  try {
+    setup(d);
+    writeSnapshot(d, { a: mk({ input: 1 }) });
+    // Legacy mock (no `opencode` key at all) must behave exactly as before.
+    mockFetch({ a: mk({ input: 1 }) });
+    const r = await runPriceWatch(d);
+    assert.deepStrictEqual(r.freeModels, [], 'freeModels should be empty with no Zen key');
+    assert.strictEqual(r.changes.length, 0, 'expected zero changes, got: ' + JSON.stringify(r.changes));
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
 });
 
