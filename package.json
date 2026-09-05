@@ -5,7 +5,7 @@
   "type": "commonjs",
   "main": "src/monitor.js",
   "scripts": {
-    "test": "node --test \"tests/*.test.js\"",
+    "test": "node --test tests/*.test.js",
     "monitor": "node src/monitor.js",
     "monitor:once": "node src/monitor.js --once",
     "report": "node src/report-cli.js",
