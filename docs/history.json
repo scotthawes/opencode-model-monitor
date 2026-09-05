@@ -1458,5 +1458,881 @@
         "tiers": null
       }
     }
+  },
+  {
+    "ts": "2026-09-05T12:50:55.023Z",
+    "models": {
+      "qwen3.7-max": {
+        "cost": {
+          "input": 2.5,
+          "output": 7.5,
+          "cache_read": 0.5,
+          "cache_write": 3.125
+        },
+        "tiers": null
+      },
+      "longcat-2.0": {
+        "cost": {
+          "input": 0.3,
+          "output": 1.2,
+          "cache_read": 0.006
+        },
+        "tiers": null
+      },
+      "deepseek-v4-flash-vision-exp": {
+        "cost": {
+          "input": 0.22,
+          "output": 0.66,
+          "cache_read": 0.007
+        },
+        "tiers": null
+      },
+      "qwen3.6-plus": {
+        "cost": {
+          "input": 0.5,
+          "output": 3,
+          "cache_read": 0.05,
+          "cache_write": 0.625
+        },
+        "tiers": null
+      },
+      "muse-spark-1.2-contributor": {
+        "cost": {
+          "input": 0.1,
+          "output": 0.2,
+          "cache_read": 0.002
+        },
+        "tiers": null
+      },
+      "minimax-m2.7": {
+        "cost": {
+          "input": 0.3,
+          "output": 1.2,
+          "cache_read": 0.06
+        },
+        "tiers": null
+      },
+      "kimi-k2.6": {
+        "cost": {
+          "input": 0.95,
+          "output": 4,
+          "cache_read": 0.16
+        },
+        "tiers": null
+      },
+      "glm-5.2": {
+        "cost": {
+          "input": 1.4,
+          "output": 4.4,
+          "cache_read": 0.26
+        },
+        "tiers": null
+      },
+      "minimax-m2.5": {
+        "cost": {
+          "input": 0.3,
+          "output": 1.2,
+          "cache_read": 0.03
+        },
+        "tiers": null
+      },
+      "minimax-m3": {
+        "cost": {
+          "input": 0.3,
+          "output": 1.2,
+          "cache_read": 0.06
+        },
+        "tiers": null
+      },
+      "deepseek-v4-flash": {
+        "cost": {
+          "input": 0.22,
+          "output": 0.66,
+          "cache_read": 0.007
+        },
+        "tiers": null
+      },
+      "kimi-k2.7-code": {
+        "cost": {
+          "input": 0.95,
+          "output": 4,
+          "cache_read": 0.19
+        },
+        "tiers": null
+      },
+      "grok-4.5": {
+        "cost": {
+          "input": 2,
+          "output": 6,
+          "cache_read": 0.3
+        },
+        "tiers": null
+      },
+      "ox-alpha-free": {
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cache_read": 0
+        },
+        "tiers": null
+      },
+      "hy3": {
+        "cost": {
+          "input": 0.14,
+          "output": 0.58,
+          "cache_read": 0.035
+        },
+        "tiers": null
+      },
+      "hy4-preview": {
+        "cost": {
+          "input": 0.834,
+          "output": 2.501,
+          "cache_read": 0.042
+        },
+        "tiers": null
+      },
+      "omen-alpha": {
+        "cost": {
+          "input": 0.2,
+          "output": 0.66,
+          "cache_read": 0.04
+        },
+        "tiers": null
+      },
+      "gpt-5.6-luna": {
+        "cost": {
+          "input": 0.2,
+          "output": 1.2,
+          "cache_read": 0.02,
+          "cache_write": 0.25
+        },
+        "tiers": null
+      },
+      "kimi-k3": {
+        "cost": {
+          "input": 3,
+          "output": 15,
+          "cache_read": 0.3
+        },
+        "tiers": null
+      },
+      "glm-5.3-flash": {
+        "cost": {
+          "input": 0.075,
+          "output": 0.25,
+          "cache_read": 0.015
+        },
+        "tiers": null
+      },
+      "muse-spark-1.3-contributor": {
+        "cost": {
+          "input": 0.1,
+          "output": 0.2,
+          "cache_read": 0.002
+        },
+        "tiers": null
+      },
+      "mimo-v2-pro": {
+        "cost": {
+          "input": 1,
+          "output": 3,
+          "cache_read": 0.2
+        },
+        "tiers": null
+      },
+      "qwen3.8-flash": {
+        "cost": {
+          "input": 0.15,
+          "output": 0.47,
+          "cache_read": 0.016,
+          "cache_write": 0.2
+        },
+        "tiers": null
+      },
+      "grok-4.6": {
+        "cost": {
+          "input": 2,
+          "output": 6,
+          "cache_read": 0.5
+        },
+        "tiers": null
+      },
+      "glm-5": {
+        "cost": {
+          "input": 1,
+          "output": 3.2,
+          "cache_read": 0.2
+        },
+        "tiers": null
+      },
+      "mimo-v2-omni": {
+        "cost": {
+          "input": 0.4,
+          "output": 2,
+          "cache_read": 0.08
+        },
+        "tiers": null
+      },
+      "qwen3.8-max": {
+        "cost": {
+          "input": 2,
+          "output": 6,
+          "cache_read": 0.25,
+          "cache_write": 2.5
+        },
+        "tiers": null
+      },
+      "kimi-k2.5": {
+        "cost": {
+          "input": 0.6,
+          "output": 3,
+          "cache_read": 0.1
+        },
+        "tiers": null
+      },
+      "glm-5.1": {
+        "cost": {
+          "input": 1.4,
+          "output": 4.4,
+          "cache_read": 0.26
+        },
+        "tiers": null
+      },
+      "qwen3.7-plus": {
+        "cost": {
+          "input": 0.4,
+          "output": 1.6,
+          "cache_read": 0.04,
+          "cache_write": 0.5
+        },
+        "tiers": null
+      },
+      "deepseek-v4-pro": {
+        "cost": {
+          "input": 0.66,
+          "output": 1.98,
+          "cache_read": 0.022
+        },
+        "tiers": null
+      },
+      "glm-5.3": {
+        "cost": {
+          "input": 1.4,
+          "output": 4.4,
+          "cache_read": 0.26
+        },
+        "tiers": null
+      },
+      "mimo-v2.5": {
+        "cost": {
+          "input": 0.14,
+          "output": 0.28,
+          "cache_read": 0.0028
+        },
+        "tiers": null
+      },
+      "mimo-v2.5-pro": {
+        "cost": {
+          "input": 0.435,
+          "output": 0.87,
+          "cache_read": 0.003625
+        },
+        "tiers": null
+      },
+      "qwen3.5-plus": {
+        "cost": {
+          "input": 0.2,
+          "output": 1.2,
+          "cache_read": 0.02,
+          "cache_write": 0.25
+        },
+        "tiers": null
+      }
+    }
+  },
+  {
+    "ts": "2026-09-05T13:28:57.177Z",
+    "models": {
+      "qwen3.7-max": {
+        "cost": {
+          "input": 2.5,
+          "output": 7.5,
+          "cache_read": 0.5,
+          "cache_write": 3.125
+        },
+        "tiers": null
+      },
+      "longcat-2.0": {
+        "cost": {
+          "input": 0.3,
+          "output": 1.2,
+          "cache_read": 0.006
+        },
+        "tiers": null
+      },
+      "deepseek-v4-flash-vision-exp": {
+        "cost": {
+          "input": 0.22,
+          "output": 0.66,
+          "cache_read": 0.007
+        },
+        "tiers": null
+      },
+      "qwen3.6-plus": {
+        "cost": {
+          "input": 0.5,
+          "output": 3,
+          "cache_read": 0.05,
+          "cache_write": 0.625
+        },
+        "tiers": null
+      },
+      "muse-spark-1.2-contributor": {
+        "cost": {
+          "input": 0.1,
+          "output": 0.2,
+          "cache_read": 0.002
+        },
+        "tiers": null
+      },
+      "minimax-m2.7": {
+        "cost": {
+          "input": 0.3,
+          "output": 1.2,
+          "cache_read": 0.06
+        },
+        "tiers": null
+      },
+      "kimi-k2.6": {
+        "cost": {
+          "input": 0.95,
+          "output": 4,
+          "cache_read": 0.16
+        },
+        "tiers": null
+      },
+      "glm-5.2": {
+        "cost": {
+          "input": 1.4,
+          "output": 4.4,
+          "cache_read": 0.26
+        },
+        "tiers": null
+      },
+      "minimax-m2.5": {
+        "cost": {
+          "input": 0.3,
+          "output": 1.2,
+          "cache_read": 0.03
+        },
+        "tiers": null
+      },
+      "minimax-m3": {
+        "cost": {
+          "input": 0.3,
+          "output": 1.2,
+          "cache_read": 0.06
+        },
+        "tiers": null
+      },
+      "deepseek-v4-flash": {
+        "cost": {
+          "input": 0.22,
+          "output": 0.66,
+          "cache_read": 0.007
+        },
+        "tiers": null
+      },
+      "kimi-k2.7-code": {
+        "cost": {
+          "input": 0.95,
+          "output": 4,
+          "cache_read": 0.19
+        },
+        "tiers": null
+      },
+      "grok-4.5": {
+        "cost": {
+          "input": 2,
+          "output": 6,
+          "cache_read": 0.3
+        },
+        "tiers": null
+      },
+      "ox-alpha-free": {
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cache_read": 0
+        },
+        "tiers": null
+      },
+      "hy3": {
+        "cost": {
+          "input": 0.14,
+          "output": 0.58,
+          "cache_read": 0.035
+        },
+        "tiers": null
+      },
+      "hy4-preview": {
+        "cost": {
+          "input": 0.834,
+          "output": 2.501,
+          "cache_read": 0.042
+        },
+        "tiers": null
+      },
+      "omen-alpha": {
+        "cost": {
+          "input": 0.2,
+          "output": 0.66,
+          "cache_read": 0.04
+        },
+        "tiers": null
+      },
+      "gpt-5.6-luna": {
+        "cost": {
+          "input": 0.2,
+          "output": 1.2,
+          "cache_read": 0.02,
+          "cache_write": 0.25
+        },
+        "tiers": null
+      },
+      "kimi-k3": {
+        "cost": {
+          "input": 3,
+          "output": 15,
+          "cache_read": 0.3
+        },
+        "tiers": null
+      },
+      "glm-5.3-flash": {
+        "cost": {
+          "input": 0.075,
+          "output": 0.25,
+          "cache_read": 0.015
+        },
+        "tiers": null
+      },
+      "muse-spark-1.3-contributor": {
+        "cost": {
+          "input": 0.1,
+          "output": 0.2,
+          "cache_read": 0.002
+        },
+        "tiers": null
+      },
+      "mimo-v2-pro": {
+        "cost": {
+          "input": 1,
+          "output": 3,
+          "cache_read": 0.2
+        },
+        "tiers": null
+      },
+      "qwen3.8-flash": {
+        "cost": {
+          "input": 0.15,
+          "output": 0.47,
+          "cache_read": 0.016,
+          "cache_write": 0.2
+        },
+        "tiers": null
+      },
+      "grok-4.6": {
+        "cost": {
+          "input": 2,
+          "output": 6,
+          "cache_read": 0.5
+        },
+        "tiers": null
+      },
+      "glm-5": {
+        "cost": {
+          "input": 1,
+          "output": 3.2,
+          "cache_read": 0.2
+        },
+        "tiers": null
+      },
+      "mimo-v2-omni": {
+        "cost": {
+          "input": 0.4,
+          "output": 2,
+          "cache_read": 0.08
+        },
+        "tiers": null
+      },
+      "qwen3.8-max": {
+        "cost": {
+          "input": 2,
+          "output": 6,
+          "cache_read": 0.25,
+          "cache_write": 2.5
+        },
+        "tiers": null
+      },
+      "kimi-k2.5": {
+        "cost": {
+          "input": 0.6,
+          "output": 3,
+          "cache_read": 0.1
+        },
+        "tiers": null
+      },
+      "glm-5.1": {
+        "cost": {
+          "input": 1.4,
+          "output": 4.4,
+          "cache_read": 0.26
+        },
+        "tiers": null
+      },
+      "qwen3.7-plus": {
+        "cost": {
+          "input": 0.4,
+          "output": 1.6,
+          "cache_read": 0.04,
+          "cache_write": 0.5
+        },
+        "tiers": null
+      },
+      "deepseek-v4-pro": {
+        "cost": {
+          "input": 0.66,
+          "output": 1.98,
+          "cache_read": 0.022
+        },
+        "tiers": null
+      },
+      "glm-5.3": {
+        "cost": {
+          "input": 1.4,
+          "output": 4.4,
+          "cache_read": 0.26
+        },
+        "tiers": null
+      },
+      "mimo-v2.5": {
+        "cost": {
+          "input": 0.14,
+          "output": 0.28,
+          "cache_read": 0.0028
+        },
+        "tiers": null
+      },
+      "mimo-v2.5-pro": {
+        "cost": {
+          "input": 0.435,
+          "output": 0.87,
+          "cache_read": 0.003625
+        },
+        "tiers": null
+      },
+      "qwen3.5-plus": {
+        "cost": {
+          "input": 0.2,
+          "output": 1.2,
+          "cache_read": 0.02,
+          "cache_write": 0.25
+        },
+        "tiers": null
+      }
+    }
+  },
+  {
+    "ts": "2026-09-05T14:30:19.062Z",
+    "models": {
+      "qwen3.7-max": {
+        "cost": {
+          "input": 2.5,
+          "output": 7.5,
+          "cache_read": 0.5,
+          "cache_write": 3.125
+        },
+        "tiers": null
+      },
+      "longcat-2.0": {
+        "cost": {
+          "input": 0.3,
+          "output": 1.2,
+          "cache_read": 0.006
+        },
+        "tiers": null
+      },
+      "deepseek-v4-flash-vision-exp": {
+        "cost": {
+          "input": 0.22,
+          "output": 0.66,
+          "cache_read": 0.007
+        },
+        "tiers": null
+      },
+      "qwen3.6-plus": {
+        "cost": {
+          "input": 0.5,
+          "output": 3,
+          "cache_read": 0.05,
+          "cache_write": 0.625
+        },
+        "tiers": null
+      },
+      "muse-spark-1.2-contributor": {
+        "cost": {
+          "input": 0.1,
+          "output": 0.2,
+          "cache_read": 0.002
+        },
+        "tiers": null
+      },
+      "minimax-m2.7": {
+        "cost": {
+          "input": 0.3,
+          "output": 1.2,
+          "cache_read": 0.06
+        },
+        "tiers": null
+      },
+      "kimi-k2.6": {
+        "cost": {
+          "input": 0.95,
+          "output": 4,
+          "cache_read": 0.16
+        },
+        "tiers": null
+      },
+      "glm-5.2": {
+        "cost": {
+          "input": 1.4,
+          "output": 4.4,
+          "cache_read": 0.26
+        },
+        "tiers": null
+      },
+      "minimax-m2.5": {
+        "cost": {
+          "input": 0.3,
+          "output": 1.2,
+          "cache_read": 0.03
+        },
+        "tiers": null
+      },
+      "minimax-m3": {
+        "cost": {
+          "input": 0.3,
+          "output": 1.2,
+          "cache_read": 0.06
+        },
+        "tiers": null
+      },
+      "deepseek-v4-flash": {
+        "cost": {
+          "input": 0.22,
+          "output": 0.66,
+          "cache_read": 0.007
+        },
+        "tiers": null
+      },
+      "kimi-k2.7-code": {
+        "cost": {
+          "input": 0.95,
+          "output": 4,
+          "cache_read": 0.19
+        },
+        "tiers": null
+      },
+      "grok-4.5": {
+        "cost": {
+          "input": 2,
+          "output": 6,
+          "cache_read": 0.3
+        },
+        "tiers": null
+      },
+      "ox-alpha-free": {
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cache_read": 0
+        },
+        "tiers": null
+      },
+      "hy3": {
+        "cost": {
+          "input": 0.14,
+          "output": 0.58,
+          "cache_read": 0.035
+        },
+        "tiers": null
+      },
+      "hy4-preview": {
+        "cost": {
+          "input": 0.834,
+          "output": 2.501,
+          "cache_read": 0.042
+        },
+        "tiers": null
+      },
+      "omen-alpha": {
+        "cost": {
+          "input": 0.2,
+          "output": 0.66,
+          "cache_read": 0.04
+        },
+        "tiers": null
+      },
+      "gpt-5.6-luna": {
+        "cost": {
+          "input": 0.2,
+          "output": 1.2,
+          "cache_read": 0.02,
+          "cache_write": 0.25
+        },
+        "tiers": null
+      },
+      "kimi-k3": {
+        "cost": {
+          "input": 3,
+          "output": 15,
+          "cache_read": 0.3
+        },
+        "tiers": null
+      },
+      "glm-5.3-flash": {
+        "cost": {
+          "input": 0.075,
+          "output": 0.25,
+          "cache_read": 0.015
+        },
+        "tiers": null
+      },
+      "muse-spark-1.3-contributor": {
+        "cost": {
+          "input": 0.1,
+          "output": 0.2,
+          "cache_read": 0.002
+        },
+        "tiers": null
+      },
+      "mimo-v2-pro": {
+        "cost": {
+          "input": 1,
+          "output": 3,
+          "cache_read": 0.2
+        },
+        "tiers": null
+      },
+      "qwen3.8-flash": {
+        "cost": {
+          "input": 0.15,
+          "output": 0.47,
+          "cache_read": 0.016,
+          "cache_write": 0.2
+        },
+        "tiers": null
+      },
+      "grok-4.6": {
+        "cost": {
+          "input": 2,
+          "output": 6,
+          "cache_read": 0.5
+        },
+        "tiers": null
+      },
+      "glm-5": {
+        "cost": {
+          "input": 1,
+          "output": 3.2,
+          "cache_read": 0.2
+        },
+        "tiers": null
+      },
+      "mimo-v2-omni": {
+        "cost": {
+          "input": 0.4,
+          "output": 2,
+          "cache_read": 0.08
+        },
+        "tiers": null
+      },
+      "qwen3.8-max": {
+        "cost": {
+          "input": 2,
+          "output": 6,
+          "cache_read": 0.25,
+          "cache_write": 2.5
+        },
+        "tiers": null
+      },
+      "kimi-k2.5": {
+        "cost": {
+          "input": 0.6,
+          "output": 3,
+          "cache_read": 0.1
+        },
+        "tiers": null
+      },
+      "glm-5.1": {
+        "cost": {
+          "input": 1.4,
+          "output": 4.4,
+          "cache_read": 0.26
+        },
+        "tiers": null
+      },
+      "qwen3.7-plus": {
+        "cost": {
+          "input": 0.4,
+          "output": 1.6,
+          "cache_read": 0.04,
+          "cache_write": 0.5
+        },
+        "tiers": null
+      },
+      "deepseek-v4-pro": {
+        "cost": {
+          "input": 0.66,
+          "output": 1.98,
+          "cache_read": 0.022
+        },
+        "tiers": null
+      },
+      "glm-5.3": {
+        "cost": {
+          "input": 1.4,
+          "output": 4.4,
+          "cache_read": 0.26
+        },
+        "tiers": null
+      },
+      "mimo-v2.5": {
+        "cost": {
+          "input": 0.14,
+          "output": 0.28,
+          "cache_read": 0.0028
+        },
+        "tiers": null
+      },
+      "mimo-v2.5-pro": {
+        "cost": {
+          "input": 0.435,
+          "output": 0.87,
+          "cache_read": 0.003625
+        },
+        "tiers": null
+      },
+      "qwen3.5-plus": {
+        "cost": {
+          "input": 0.2,
+          "output": 1.2,
+          "cache_read": 0.02,
+          "cache_write": 0.25
+        },
+        "tiers": null
+      }
+    }
   }
 ]

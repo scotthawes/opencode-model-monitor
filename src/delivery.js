@@ -5,6 +5,7 @@ const path = require('path');
 const { execFile } = require('child_process');
 const usageTable = require('./usage-table');
 const events = require('./events'); // v0.8.0: event-sourced history (JSONL, #73)
+const changeMetric = require('./change-metric'); // shared Δ% / × / $ formatting
 
 // Delivery channels. Configured once at startup with the user's delivery
 // options + the state directory. All functions are best-effort and never throw.
@@ -1086,7 +1087,11 @@ function renderMarkdown(report) {
         const parts = order
           .filter((k) => eff && Object.prototype.hasOwnProperty.call(eff, k))
           .map((k) => `${k} ${fmtModelCost(eff[k])}`);
-        lines.push(`- ${c.model}: ${parts.join(' / ')}  (list x${fmtMult(mult)})`);
+        // PR page spec #4: surface the output $/1M change metric on the report.md
+        // cost line so the magnitude (Δ% / × / $) is stated, not just old→new.
+        const outMetric = changeMetric.fmtChangeMetric(c.oldCost && c.oldCost.output, c.newCost && c.newCost.output);
+        const outTail = outMetric ? `  [output ${outMetric}]` : '';
+        lines.push(`- ${c.model}: ${parts.join(' / ')}  (list x${fmtMult(mult)})${outTail}`);
         // P1-3, #52: a tiered model (standard + large-context) also shows the
         // effective cost of each context tier. Single-tier models yield nothing.
         const tiers = usageTable.effectiveTierCosts(c.newCost, c.model);
@@ -1390,13 +1395,17 @@ function tierLineStr(model, tiers) {
   return `${truncateModelId(model, 22)} tiers: ` + (tiers || []).map(fmtTier).join(' / ');
 }
 
-// One cost-change table row: "hy3 | 0.0175→0.14 | 0.0725→0.58 | 0.004375→0.035 | 1x | ctx 1M · tool+rsn"
+// One cost-change table row: "hy3 | 0.0175→0.14 | 0.0725→0.58 +700% (8x, +$0.5075) | 0.004375→0.035 | 1x | ctx 1M · tool+rsn"
 // The Eff× column is the effective-price multiplier after the $60 credit (list
 // x 60/usage-cap); computed at render so the raw snapshot stays unchanged.
+// The output cell ALSO carries the change metric (Δ% / × / $) so every Discord
+// cost line states the magnitude of the move, not just old→new (PR page spec #4).
 function modelChangeRowStr(r) {
   const cell = (k) => `${fmtModelCost(r.oldCost && r.oldCost[k])}→${fmtModelCost(r.newCost && r.newCost[k])}`;
+  const outMetric = changeMetric.fmtChangeMetric(r.oldCost && r.oldCost.output, r.newCost && r.newCost.output);
+  const outCell = outMetric ? `${cell('output')} ${outMetric}` : cell('output');
   const mult = usageTable.effectiveMultiplier(r.model);
-  return `${truncateModelId(r.model, 22)} | ${cell('input')} | ${cell('output')} | ${cell('cache_read')} | ${fmtMult(mult)} | ${metaShort(r.meta)}`;
+  return `${truncateModelId(r.model, 22)} | ${cell('input')} | ${outCell} | ${cell('cache_read')} | ${fmtMult(mult)} | ${metaShort(r.meta)}`;
 }
 
 function modelChangeLineStr(l) {
