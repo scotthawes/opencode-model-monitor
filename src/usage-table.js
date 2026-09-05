@@ -104,6 +104,90 @@ function setTable(map) {
   warned.clear();
 }
 
+// --- Context-tier effective cost (P1-3, #52) --------------------------------
+//
+// Some opencode-go models price by context tier: a `standard` list price
+// (<=200K context) plus a higher `large-context` price for >200K context,
+// carried under `cost.context_over_200k` (and redundantly under `cost.tiers[]`
+// with a `{ type:'context', size }` descriptor). The live catalog has no
+// per-tier usage-cap, so we apply the SAME model-level $60-credit multiplier to
+// every tier (the multiplier is per-model, not per-tier). We surface the
+// effective cost of each tier so an alert can read e.g.
+//   "hy3 tiers: standard i0.14 o1.1 cr0.035 / large-context i0.28 o2.2 cr0.07"
+// Single-tier models (no `context_over_200k` and no numeric `tiers[]`) yield []
+// so existing single-line alerts are unchanged.
+
+const TIER_METRICS = ['input', 'output', 'cache_read', 'cache_write'];
+
+// True when `c` (cost object or tier entry) carries at least one numeric price
+// metric. Best-effort: never throws on non-objects.
+function hasNumericMetrics(c) {
+  if (!c || typeof c !== 'object') return false;
+  return TIER_METRICS.some((k) => isFinite(Number(c[k])));
+}
+
+// Pull only the recognized numeric price metrics out of `c` into a fresh object.
+function pickMetrics(c) {
+  const out = {};
+  if (c && typeof c === 'object') {
+    for (const k of TIER_METRICS) {
+      const n = Number(c[k]);
+      if (isFinite(n)) out[k] = n;
+    }
+  }
+  return out;
+}
+
+// Extract the per-tier list prices from a model `cost` object. Returns [] for
+// missing/non-object cost, [{standard}] for a single-tier model, or
+// [{standard},{large-context}] for a tiered model. The alternate is taken from
+// `context_over_200k` when present, else the first numeric entry of `tiers[]`.
+// The `tiers[]` descriptor's `{ type, size }` drives the label (size > 200K ->
+// "large-context"); a non-context tier falls back to its `type` string.
+function extractTierCosts(cost) {
+  if (!cost || typeof cost !== 'object') return [];
+  const out = [];
+  if (hasNumericMetrics(cost)) {
+    out.push({ label: 'standard', cost: pickMetrics(cost) });
+  }
+  let alt = null;
+  let altMeta = null;
+  if (cost.context_over_200k && hasNumericMetrics(cost.context_over_200k)) {
+    alt = cost.context_over_200k;
+    altMeta = { type: 'context' };
+  } else if (Array.isArray(cost.tiers)) {
+    for (const t of cost.tiers) {
+      if (t && hasNumericMetrics(t)) {
+        alt = t;
+        altMeta = (t && typeof t === 'object' && t.tier) || null;
+        break;
+      }
+    }
+  }
+  if (alt) {
+    let label = 'large-context';
+    if (altMeta && altMeta.type === 'context') {
+      if (typeof altMeta.size === 'number') {
+        label = altMeta.size > 200000 ? 'large-context' : 'context>' + altMeta.size;
+      }
+    } else if (altMeta && typeof altMeta.type === 'string') {
+      label = altMeta.type;
+    }
+    out.push({ label, cost: pickMetrics(alt) });
+  }
+  return out;
+}
+
+// Effective cost (list x 60/usage-cap) for each context tier of a model. Returns
+// [] for a single-tier (or missing) model so callers render nothing extra. Each
+// entry is { label, effective:{input,output,cache_read,cache_write} }. The model
+// multiplier is applied uniformly to every tier.
+function effectiveTierCosts(cost, modelId, log) {
+  const tiers = extractTierCosts(cost);
+  if (tiers.length < 2) return []; // single-tier: nothing extra to show
+  return tiers.map((t) => ({ label: t.label, effective: effectiveCost(t.cost, modelId, log) }));
+}
+
 module.exports = {
   MONTHLY_CREDIT,
   DEFAULT_CAP,
@@ -112,5 +196,7 @@ module.exports = {
   effectiveMultiplier,
   effectiveCost,
   loadTable,
-  setTable
+  setTable,
+  extractTierCosts,
+  effectiveTierCosts
 };

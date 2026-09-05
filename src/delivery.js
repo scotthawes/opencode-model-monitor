@@ -830,6 +830,12 @@ function renderMarkdown(report) {
           .filter((k) => eff && Object.prototype.hasOwnProperty.call(eff, k))
           .map((k) => `${k} ${fmtModelCost(eff[k])}`);
         lines.push(`- ${c.model}: ${parts.join(' / ')}  (list x${fmtMult(mult)})`);
+        // P1-3, #52: a tiered model (standard + large-context) also shows the
+        // effective cost of each context tier. Single-tier models yield nothing.
+        const tiers = usageTable.effectiveTierCosts(c.newCost, c.model);
+        if (tiers.length) {
+          lines.push(`  - ${tierLineStr(c.model, tiers)}`);
+        }
       }
     }
   }
@@ -1110,6 +1116,23 @@ function fmtMult(m) {
   return parseFloat(n.toFixed(2)).toString() + 'x';
 }
 
+// Short metric keys for the compact tier line (input/output/cache_read/cache_write
+// -> i/o/cr/cw) so the second Discord line stays well under the 1900 cap.
+const TIER_SHORT = { input: 'i', output: 'o', cache_read: 'cr', cache_write: 'cw' };
+const TIER_ORDER = ['input', 'output', 'cache_read', 'cache_write'];
+
+// Render a compact "model tiers: standard iX oY crZ / large-context iX' oY' crZ'"
+// line from the effective cost of each context tier. Used as the Discord table's
+// second line and in report.md (P1-3, #52). Never throws.
+function tierLineStr(model, tiers) {
+  const fmtTier = (t) => {
+    const e = t.effective || {};
+    const m = TIER_ORDER.filter((k) => e[k] != null).map((k) => TIER_SHORT[k] + fmtModelCost(e[k]));
+    return t.label + ' ' + m.join(' ');
+  };
+  return `${truncateModelId(model, 22)} tiers: ` + (tiers || []).map(fmtTier).join(' / ');
+}
+
 // One cost-change table row: "hy3 | 0.0175→0.14 | 0.0725→0.58 | 0.004375→0.035 | 1x | ctx 1M · tool+rsn"
 // The Eff× column is the effective-price multiplier after the $60 credit (list
 // x 60/usage-cap); computed at render so the raw snapshot stays unchanged.
@@ -1134,6 +1157,11 @@ function modelChangeLineStr(l) {
     const label =
       l.reason === 'removed' ? 'FREE REMOVED' : l.reason === 'changed' ? 'FREE CHANGED' : 'FREE available';
     return `${tag} ${l.model} ${label}  ·  ${meta}`;
+  }
+  if (l.subtype === 'tier') {
+    // P1-3, #52: second line of the model-change table showing the effective cost
+    // of each context tier (standard / large-context). Rides in the first chunk.
+    return `↳ ${tierLineStr(l.model, l.tiers)}`;
   }
   return `• ${l.model} ${l.subtype || 'changed'}  ·  ${meta}`;
 }
@@ -1207,8 +1235,18 @@ async function deliverModelChangeTable(changes, opts) {
     // plain line to Discord — the table below is the single Discord view.
     const res = await alert('model_change', 'Model changed', msg, { skipDiscord: true });
     if (!(res && res.delivered)) continue; // suppressed by dedup
-    if (ch.subtype === 'cost') rows.push(ch);
-    else lines.push(ch);
+    if (ch.subtype === 'cost') {
+      rows.push(ch);
+      // P1-3, #52: a tiered model (standard + large-context pricing) gets a second
+      // line showing the effective cost of each tier. Single-tier models yield []
+      // so the alert is unchanged. Best-effort: never throws.
+      try {
+        const tiers = usageTable.effectiveTierCosts(ch.newCost, ch.model);
+        if (tiers.length) lines.push({ subtype: 'tier', model: ch.model, tiers });
+      } catch (_) {
+        // Never let tier rendering break the main alert.
+      }
+    } else lines.push(ch);
   }
   if (!rows.length && !lines.length) return [];
   const chunks = buildModelChangeChunks(rows, lines);
