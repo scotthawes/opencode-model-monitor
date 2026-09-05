@@ -801,6 +801,18 @@ function renderMarkdown(report) {
     lines.push('Changes detected:');
     for (const c of p.changes) lines.push(`- ${c}`);
   }
+  // Per-model metadata for the changed models (P0-2). Purely additive to the
+  // diff report; degrades to nothing when a model carries no metadata.
+  if (Array.isArray(p.modelChanges) && p.modelChanges.length) {
+    const withMeta = p.modelChanges.filter(
+      (c) => c.meta && (c.meta.contextWindow || c.meta.capabilities || c.meta.provider)
+    );
+    if (withMeta.length) {
+      lines.push('');
+      lines.push('Model metadata (changed):');
+      for (const c of withMeta) lines.push(`- ${c.model}: ${metaShort(c.meta)}`);
+    }
+  }
   if (p.modelCount != null) {
     lines.push('');
     lines.push(`Models tracked: ${p.modelCount}`);
@@ -1013,20 +1025,66 @@ function truncateModelId(s, n) {
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
 }
 
-// One cost-change table row: "hy3 | 0.0175→0.14 | 0.0725→0.58 | 0.004375→0.035"
+// Compact metadata summary for a model-change entry's `meta` (from price-watch's
+// extractModelMeta). Returns an em-dash when no metadata is available so the
+// table/lines stay readable. Never throws.
+function metaShort(meta) {
+  if (!meta || typeof meta !== 'object') return '—';
+  const parts = [];
+  if (meta.contextWindow) parts.push('ctx ' + fmtCtx(meta.contextWindow));
+  if (meta.capabilities && typeof meta.capabilities === 'object') {
+    const c = meta.capabilities;
+    const tags = [];
+    if (c.tool_call) tags.push('tool');
+    if (c.reasoning) tags.push('rsn');
+    if (c.attachment) tags.push('att');
+    if (c.structured_output) tags.push('so');
+    const inp = (c.modalities && c.modalities.input) || [];
+    if (Array.isArray(inp)) {
+      if (inp.includes('image')) tags.push('img');
+      if (inp.includes('audio')) tags.push('aud');
+    }
+    if (tags.length) parts.push(tags.join('+'));
+  }
+  if (meta.provider) parts.push(providerShort(meta.provider));
+  return parts.length ? parts.join(' · ') : '—';
+}
+
+// Format a context-window size into a short human token: 1048576 -> "1M",
+// 256000 -> "256k", 2000 -> "2000".
+function fmtCtx(n) {
+  const num = Number(n);
+  if (isNaN(num)) return '—';
+  if (num >= 1e6) {
+    const m = num / 1e6;
+    return (m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)) + 'M';
+  }
+  if (num >= 1e3) return Math.round(num / 1e3) + 'k';
+  return String(num);
+}
+
+// Shorten a provider id like "@ai-sdk/anthropic" -> "anthropic" for the table.
+function providerShort(p) {
+  const s = String(p == null ? '' : p);
+  const i = s.lastIndexOf('/');
+  return i >= 0 ? s.slice(i + 1) : s;
+}
+
+// One cost-change table row: "hy3 | 0.0175→0.14 | 0.0725→0.58 | 0.004375→0.035 | ctx 1M · tool+rsn"
 function modelChangeRowStr(r) {
   const cell = (k) => `${fmtModelCost(r.oldCost && r.oldCost[k])}→${fmtModelCost(r.newCost && r.newCost[k])}`;
-  return `${truncateModelId(r.model, 22)} | ${cell('input')} | ${cell('output')} | ${cell('cache_read')}`;
+  return `${truncateModelId(r.model, 22)} | ${cell('input')} | ${cell('output')} | ${cell('cache_read')} | ${metaShort(r.meta)}`;
 }
 
 function modelChangeLineStr(l) {
+  const meta = metaShort(l.meta);
   if (l.subtype === 'added') {
     const c = l.cost || {};
-    return `🟢 ${l.model} ADDED — input ${fmtModelCost(c.input)} / output ${fmtModelCost(c.output)}`;
+    return `🟢 ${l.model} ADDED — input ${fmtModelCost(c.input)} / output ${fmtModelCost(c.output)}  ·  ${meta}`;
   }
-  if (l.subtype === 'removed') return `⚫ ${l.model} REMOVED`;
-  if (l.subtype === 'tiers') return `⚪ ${l.model} TIERS changed`;
-  return `• ${l.model} ${l.subtype || 'changed'}`;
+  if (l.subtype === 'removed') return `⚫ ${l.model} REMOVED  ·  ${meta}`;
+  if (l.subtype === 'tiers') return `⚪ ${l.model} TIERS changed  ·  ${meta}`;
+  return `• ${l.model} ${l.subtype || 'changed'}  ·  ${meta}`;
 }
 
 // Human-readable single line (matches price-watch's legacy string format so the
@@ -1059,7 +1117,7 @@ function buildModelChangeChunks(rows, lines) {
     chunks.push(body.length > MODEL_TABLE_MAX ? body.slice(0, MODEL_TABLE_MAX) : body);
     return chunks;
   }
-  const tableHeader = 'Model | Input | Output | Cache';
+  const tableHeader = 'Model | Input | Output | Cache | Meta';
   for (let i = 0; i < rows.length; i += MODEL_TABLE_MAX_ROWS) {
     const page = rows.slice(i, i + MODEL_TABLE_MAX_ROWS);
     let body = head(rows.length, lines ? lines.length : 0);

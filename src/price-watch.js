@@ -73,6 +73,49 @@ function ensureSnapshotExists(snapFile, message) {
   }
 }
 
+// Extract display metadata for a model from a live api.json entry. This is
+// ADDITIVE relative to the existing cost/tiers diff: it never affects the
+// cost/tiers comparison and degrades gracefully (nulls) when a field is absent.
+// The source of truth is api.json; it already carries capabilities, context
+// window (`limit`), provider (npm for some), open_weights, and knowledge. The
+// structured privacy/training fields are NOT present in api.json today — enriching
+// from models.dev is a documented follow-up (P0-2, see GAPS.md) and is intentionally
+// NOT attempted here so the monitor cycle never blocks or fails on an external scrape.
+function extractModelMeta(m) {
+  m = m || {};
+  const modalities = m.modalities && typeof m.modalities === 'object' ? m.modalities : null;
+  const limit = m.limit && typeof m.limit === 'object' ? m.limit : null;
+  const provider =
+    m.provider && typeof m.provider === 'object' ? m.provider.npm || m.provider.id || null : null;
+  let capabilities = null;
+  if (
+    ('tool_call' in m) || ('reasoning' in m) || ('attachment' in m) ||
+    ('structured_output' in m) || ('temperature' in m) || ('interleaved' in m) || modalities
+  ) {
+    capabilities = {
+      tool_call: !!m.tool_call,
+      reasoning: !!m.reasoning,
+      attachment: !!m.attachment,
+      structured_output: !!m.structured_output,
+      temperature: !!m.temperature,
+      interleaved: !!m.interleaved,
+      modalities
+    };
+  }
+  return {
+    name: typeof m.name === 'string' ? m.name : null,
+    family: typeof m.family === 'string' ? m.family : null,
+    provider,
+    contextWindow: limit && typeof limit.context === 'number' ? limit.context : null,
+    outputLimit: limit && typeof limit.output === 'number' ? limit.output : null,
+    capabilities,
+    open_weights: typeof m.open_weights === 'boolean' ? m.open_weights : null,
+    knowledge: m.knowledge != null ? m.knowledge : null,
+    release_date: typeof m.release_date === 'string' ? m.release_date : null,
+    last_updated: typeof m.last_updated === 'string' ? m.last_updated : null
+  };
+}
+
 // Fetches the authoritative pricing catalog for the opencode-go provider,
 // diffs it against the previous snapshot, and alerts on any model change.
 // Returns { status, models, changes, modelCount, error }.
@@ -134,7 +177,9 @@ async function runPriceWatch(stateDir) {
   const modelsMap = {};
   for (const id of Object.keys(modelsRaw)) {
     const m = modelsRaw[id] || {};
-    modelsMap[id] = { cost: m.cost || null, tiers: m.tiers || null };
+    // `meta` is additive: it rides along in the snapshot + report/Discord views
+    // but is NEVER part of the cost/tiers diff below, so existing alerts stay intact.
+    modelsMap[id] = { cost: m.cost || null, tiers: m.tiers || null, meta: extractModelMeta(m) };
   }
 
   let prev = {};
@@ -163,24 +208,24 @@ async function runPriceWatch(stateDir) {
     for (const id of newIds) {
       if (!prevIds.has(id)) {
         changes.push(`Added model: ${id}`);
-        modelChanges.push({ subtype: 'added', model: id, cost: (modelsMap[id] || {}).cost || null });
+        modelChanges.push({ subtype: 'added', model: id, cost: (modelsMap[id] || {}).cost || null, meta: (modelsMap[id] || {}).meta || null });
       } else {
         const a = prev[id] || {};
         const b = modelsMap[id] || {};
         if (JSON.stringify(a.cost) !== JSON.stringify(b.cost)) {
           changes.push(`Cost changed for ${id}: ${JSON.stringify(a.cost)} -> ${JSON.stringify(b.cost)}`);
-          modelChanges.push({ subtype: 'cost', model: id, oldCost: a.cost || null, newCost: b.cost || null });
+          modelChanges.push({ subtype: 'cost', model: id, oldCost: a.cost || null, newCost: b.cost || null, meta: (modelsMap[id] || {}).meta || null });
         }
         if (JSON.stringify(a.tiers) !== JSON.stringify(b.tiers)) {
           changes.push(`Tiers changed for ${id}`);
-          modelChanges.push({ subtype: 'tiers', model: id });
+          modelChanges.push({ subtype: 'tiers', model: id, meta: (modelsMap[id] || {}).meta || null });
         }
       }
     }
     for (const id of prevIds) {
       if (!newIds.has(id)) {
         changes.push(`Removed model: ${id}`);
-        modelChanges.push({ subtype: 'removed', model: id });
+        modelChanges.push({ subtype: 'removed', model: id, meta: (prev[id] || {}).meta || null });
       }
     }
   } else {
@@ -202,8 +247,15 @@ async function runPriceWatch(stateDir) {
   }
 
   // Persist the time-series sample (additive change; never blocks the alert
-  // path). Only reached on a successful, non-empty price fetch.
-  appendPriceHistory(stateDir, modelsMap);
+  // path). Only reached on a successful, non-empty price fetch. The history
+  // schema stays { id: { cost, tiers } } (no meta) to preserve the documented
+  // P1-4 format; metadata lives in the snapshot + report/Discord views.
+  const historyModels = {};
+  for (const id of Object.keys(modelsMap)) {
+    const e = modelsMap[id] || {};
+    historyModels[id] = { cost: e.cost || null, tiers: e.tiers || null };
+  }
+  appendPriceHistory(stateDir, historyModels);
 
   // alerts.log still gets the human-readable single lines, while Discord gets a
   // single aggregated table post (old->new per metric) instead of N one-liners.
@@ -215,6 +267,7 @@ async function runPriceWatch(stateDir) {
     status: 'ok',
     models: modelsMap,
     changes,
+    modelChanges,
     modelCount: newIds.size
   };
 }
@@ -242,4 +295,4 @@ function isValidSnapshot(obj) {
   });
 }
 
-module.exports = { runPriceWatch, appendPriceHistory };
+module.exports = { runPriceWatch, appendPriceHistory, extractModelMeta };
