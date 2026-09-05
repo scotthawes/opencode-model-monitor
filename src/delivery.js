@@ -97,11 +97,23 @@ function computeDedupKey(title, message) {
   // 1) Explicit structured references we ourselves emit (covers both the api
   //    diff and the feed phrasing): "Added model: X", "Removed model: X",
   //    "Cost changed for X: ...", "Tiers changed for X", "Free model ...: X".
+  //    The model id may sit between the phrase and the trailing colon
+  //    (e.g. "Cost changed for beta: ..."), so the colon is optional and the id
+  //    is captured as the first token after the phrase. This lets pure-letter ids
+  //    ("beta", "gpt") collapse to a real key instead of falling through to the
+  //    generic scan (BUG #85: letter-id dedup). The capture class already admits
+  //    pure letters, so no further change is needed there.
   const explicit = String(message || '').match(
-    /(?:added model|removed model|cost changed for|tiers changed for|free model (?:available|changed|removed)):\s*([a-z0-9][a-z0-9\-\.]*)/i
+    /(?:added model|removed model|cost changed for|tiers changed for|free model (?:available|changed|removed))\s*:?\s*([a-z0-9][a-z0-9\-\.]*)/i
   );
   if (explicit) return 'model:' + normalize(explicit[1]);
-
+  // (regex above is intentionally case-INSENSITIVE — the `i` flag from the original
+  // is required so capitalized phrasing "Added model"/"Removed model" parses.)
+  // Case-INSENSITIVE: the `i` flag (carried over from the original) so capitalized
+  // phrasing ("Added model", "Removed model") still parses. The capture class already
+  // admits pure letters, so "beta"/"gpt" collapse to a real key here instead of
+  // falling through to the generic scan (BUG #85: letter-id dedup).
+  if (explicit) return 'model:' + normalize(explicit[1]);
   // 2) Generic token scan using the requested model-id shape
   //    /([a-z0-9][a-z0-9\-\.]*)/i. A model id token carries at least one letter
   //    AND a digit/hyphen (e.g. "hy3", "qwen3.8-flash", "claude-4"), which
@@ -111,11 +123,26 @@ function computeDedupKey(title, message) {
   //    which strips spaces and would collapse the whole message into one token).
   const textLc = (String(title || '') + ' ' + String(message || '')).toLowerCase();
   const tokens = textLc.match(/[a-z0-9][a-z0-9\-\.]*/g) || [];
+  // Prefer an id that carries a letter AND a digit/hyphen (e.g. "hy3",
+  // "qwen3.8-flash", "claude-4"). Only if no such token exists do we fall back to
+  // a pure-letter token of length >= 3 (e.g. "beta", "gpt"), which legitimately name
+  // models but carry no digit/hyphen. This relaxes the old rule that required a
+  // digit/hyphen unconditionally and left pure-letter ids returning null, so they
+  // never deduplicated (BUG #85: letter-id dedup). Two-pass selection keeps real ids
+  // from being shadowed by common words ("model", "changed") when a digit-bearing id
+  // is present; the explicit-message regex above (step 1) is always preferred for our
+  // own structured phrasing.
   let bestTok = '';
+  let bestLetterOnly = '';
   for (const t of tokens) {
-    if (/[a-z]/.test(t) && /[\d\-]/.test(t) && t.length > bestTok.length) bestTok = t;
+    if (/[a-z]/.test(t) && /[\d\-]/.test(t)) {
+      if (t.length > bestTok.length) bestTok = t;
+    } else if (/^[a-z]+$/.test(t) && t.length >= 3) {
+      if (t.length > bestLetterOnly.length) bestLetterOnly = t;
+    }
   }
-  return bestTok ? 'model:' + normalize(bestTok) : null;
+  const chosen = bestTok || bestLetterOnly;
+  return chosen ? 'model:' + normalize(chosen) : null;
 }
 
 function dedupPath() {
