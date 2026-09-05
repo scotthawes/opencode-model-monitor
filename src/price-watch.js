@@ -6,6 +6,55 @@ const delivery = require('./delivery');
 
 const API_URL = 'https://models.opencode.ai/api.json';
 
+// --- P2-2 (#55): zod-style validation of api.json shape drift -----------------
+//
+// Hand-rolled schema check (no new deps) that fails closed on a malformed
+// catalog so a transient upstream glitch never reports every model as removed
+// or overwrites the prior good snapshot. Returns { ok, reason }. `reason` is a
+// human-readable, actionable string suitable for a WARNING alert.
+//
+// Schema (the opencode-go provider is the source of truth for billable pricing):
+//   - top level must be a non-array object
+//   - must contain `opencode-go` (object) with `models` (non-empty object)
+//   - each model must carry a cost-like numeric field: a `cost` object with at
+//     least one numeric value, or a flat `input`/`output` number.
+function validateApiShape(data) {
+  if (data == null || typeof data !== 'object' || Array.isArray(data)) {
+    return { ok: false, reason: `top-level payload is not an object (got ${typeof data})` };
+  }
+  const og = data['opencode-go'];
+  if (og == null || typeof og !== 'object' || Array.isArray(og)) {
+    return { ok: false, reason: "missing or non-object 'opencode-go' key" };
+  }
+  const models = og.models;
+  if (models == null || typeof models !== 'object' || Array.isArray(models)) {
+    return { ok: false, reason: "'opencode-go.models' is missing or not an object" };
+  }
+  const ids = Object.keys(models);
+  if (ids.length === 0) {
+    return { ok: false, reason: "'opencode-go.models' is empty" };
+  }
+  for (const id of ids) {
+    const m = models[id];
+    if (m == null || typeof m !== 'object' || Array.isArray(m)) {
+      return { ok: false, reason: `model '${id}' is not an object` };
+    }
+    let hasNumericCost = false;
+    if (typeof m.input === 'number' || typeof m.output === 'number') hasNumericCost = true;
+    if (m.cost != null && typeof m.cost === 'object' && !Array.isArray(m.cost)) {
+      // A cost object with at least one numeric field counts as cost-like.
+      if (Object.keys(m.cost).some((k) => typeof m.cost[k] === 'number')) hasNumericCost = true;
+    }
+    if (!hasNumericCost) {
+      return {
+        ok: false,
+        reason: `model '${id}' has no cost-like numeric field (expected a 'cost' object with numeric values or flat 'input'/'output' numbers)`
+      };
+    }
+  }
+  return { ok: true };
+}
+
 // --- Price history time-series ---------------------------------------------
 //
 // Persist a dated pricing sample on every successful price-watch so price drops
@@ -188,20 +237,19 @@ async function runPriceWatch(stateDir) {
     return { status: 'unknown', error: 'parse', models: readSnapshot(snapFile) };
   }
 
+  // P2-2 (#55): zod-style validation of api.json shape drift. A malformed
+  // catalog on a 200-OK is treated exactly like a fetch failure — a WARNING
+  // alert plus no diff — so a transient upstream glitch never reports every
+  // model as removed or clobbers the prior good snapshot.
+  const shape = validateApiShape(data);
+  if (!shape.ok) {
+    delivery.alert('warning', 'Pricing shape unexpected', shape.reason);
+    ensureSnapshotExists(snapFile, shape.reason);
+    return { status: 'unknown', error: shape.reason, models: readSnapshot(snapFile), changes: [] };
+  }
+
   const og = (data && data['opencode-go']) || null;
   const modelsRaw = (og && og.models) || {};
-  if (!modelsRaw || typeof modelsRaw !== 'object' || Object.keys(modelsRaw).length === 0) {
-    // Live data shape is wrong (opencode-go missing, or models empty) despite a
-    // 200-OK. Treat as a fetch failure: alert + no diff. Critically, do NOT
-    // overwrite the prior good snapshot, so we never report every model as
-    // removed on a transient upstream glitch.
-    delivery.alert(
-      'warning',
-      'Pricing data empty',
-      'opencode-go models missing/empty on 200-OK; treating as fetch-failed (no diff kept)'
-    );
-    return { status: 'unknown', error: 'empty live data', models: readSnapshot(snapFile), changes: [] };
-  }
   const modelsMap = {};
   for (const id of Object.keys(modelsRaw)) {
     const m = modelsRaw[id] || {};
@@ -400,4 +448,4 @@ function isValidSnapshot(obj) {
   });
 }
 
-module.exports = { runPriceWatch, appendPriceHistory, extractModelMeta, isFreeModel };
+module.exports = { runPriceWatch, appendPriceHistory, extractModelMeta, isFreeModel, validateApiShape };
