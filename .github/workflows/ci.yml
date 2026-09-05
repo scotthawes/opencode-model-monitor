@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Lint / Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies (ci, reproducible)
+        run: npm ci
+
+      # Syntax-only smoke: parse every source file WITHOUT executing it, so we
+      # never hit the live pricing/usage APIs in CI.
+      - name: Syntax check (no network)
+        run: |
+          for f in src/*.js; do
+            node --check "$f"
+          done
+
+      - name: Unit tests
+        run: npm test
+
+      # Offline smoke of the report CLI (reads local state/history.json only —
+      # prints "No price history yet" and exits 0 when absent). No network.
+      - name: report-cli --history smoke (no network)
+        run: node src/report-cli.js --history
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        # secrets/state/subscribers are excluded via .dockerignore, so the image
+        # carries no credentials.
+        run: docker build -t model-budget-guard:ci .

@@ -163,6 +163,19 @@ function warnDateFor(history, win, now) {
   return humanDate(new Date(now + daysToWarn * 864e5).toISOString());
 }
 
+// Project the ~95% critical date for a window (same linear model as warnDateFor,
+// threshold 95). Returns 'at/above crit' when already at/above, null when stable.
+function critDateFor(history, win, now) {
+  const wi = delivery.windowInfo(history, win, now);
+  if (!history.length || !wi) return null;
+  const { current, delta, daysElapsed } = wi;
+  const rate = daysElapsed > 0 ? delta / daysElapsed : 0;
+  if (rate <= 0) return null;
+  if (current >= 95) return 'at/above crit';
+  const daysToCrit = (95 - current) / rate;
+  return humanDate(new Date(now + daysToCrit * 864e5).toISOString());
+}
+
 // Build 1-3 Discord-safe chunks (each <=1900 chars) from the current report,
 // in a scannable, chat-first layout:
 //
@@ -320,4 +333,4 @@ async function postDigest(opts) {
   return chunks;
 }
 
-module.exports = { buildDigestChunks, postDigest, chunkText, readReport, CHUNK_MAX };
+module.exports = { buildDigestChunks, postDigest, chunkText, readReport, CHUNK_MAX, warnDateFor, critDateFor };
