@@ -217,6 +217,16 @@ function buildDigestChunks(report, opts) {
   const events = getEvents(stateDir, now);
   const eventCount = events.length;
 
+  // Fix f: prioritize model_change events in "What changed" (model events
+  // first, then quota crossings / other levels), each group newest-first.
+  const priorityOf = (e) => (e && e.level === 'model_change' ? 0 : 1);
+  const sortedEvents = events.slice().sort((a, b) => {
+    const pa = priorityOf(a);
+    const pb = priorityOf(b);
+    if (pa !== pb) return pa - pb;
+    return Date.parse(b.ts) - Date.parse(a.ts);
+  });
+
   // Headline window for the TL;DR is monthly (the budget users care about),
   // falling back to the last available window. Projections (warn dates) are only
   // meaningful for the headline window — rolling/weekly reset too often for a
@@ -251,7 +261,7 @@ function buildDigestChunks(report, opts) {
   if (headlinePct != null) {
     tldrParts.push(`monthly ${headlinePct}%${deltaStr(headlineDelta)}`);
   }
-  if (nextResetIso) tldrParts.push(`next reset ${humanDate(nextResetIso)}`);
+  if (nextResetIso) tldrParts.push(`next reset ${delivery.humanizeReset(nextResetIso)}`);
   const tldr = tldrParts.join(' · ');
 
   // --- chunk 1: TL;DR + what changed ---
@@ -260,7 +270,7 @@ function buildDigestChunks(report, opts) {
     c1.push('_No discrete changes — quota only._');
   } else {
     c1.push('**What changed**');
-    const shown = events.slice(0, MAX_EVENTS);
+    const shown = sortedEvents.slice(0, MAX_EVENTS);
     for (const ev of shown) c1.push(describeEvent(ev));
     if (eventCount > MAX_EVENTS) c1.push(`• +${eventCount - MAX_EVENTS} more — see changelog`);
   }

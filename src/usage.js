@@ -42,6 +42,11 @@ async function runUsage(authJsonPath, thresholds, stateDir) {
     }
   }
 
+  // Per-window quota status (ok/warn/crit) persisted across cycles so a
+  // warn/crit alert fires only ONCE per crossing (fix a).
+  const quotaStatusFile = historyFile ? path.join(stateDir, 'quota-status.json') : null;
+  const quotaStatus = loadQuotaStatus(quotaStatusFile);
+
   // Per-cycle delta is computed against the previous sample in the series (the
   // last element before we append the new one this cycle).
   const prevSample = history.length ? history[history.length - 1] : null;
@@ -81,12 +86,18 @@ async function runUsage(authJsonPath, thresholds, stateDir) {
   try {
     res = await fetch(USAGE_URL, { headers: { Authorization: 'Bearer ' + key } });
   } catch (e) {
-    delivery.alert('warning', 'Usage fetch failed', String(e && e.message ? e.message : e));
+    delivery.alert('warning', 'Usage fetch failed', String(e && e.message ? e.message : e), {
+      dedupKey: 'usage:fetch',
+      dedupTtlMs: 3600000
+    });
     return { status: 'unknown', error: String(e && e.message ? e.message : e) };
   }
 
   if (!res.ok) {
-    delivery.alert('warning', `Usage HTTP ${res.status}`, 'check your opencode-go key');
+    delivery.alert('warning', `Usage HTTP ${res.status}`, 'check your opencode-go key', {
+      dedupKey: 'usage:http',
+      dedupTtlMs: 3600000
+    });
     return { status: 'unknown', error: `HTTP ${res.status}` };
   }
 
@@ -94,7 +105,10 @@ async function runUsage(authJsonPath, thresholds, stateDir) {
   try {
     data = await res.json();
   } catch (e) {
-    delivery.alert('warning', 'Usage JSON parse failed', String(e && e.message ? e.message : e));
+    delivery.alert('warning', 'Usage JSON parse failed', String(e && e.message ? e.message : e), {
+      dedupKey: 'usage:parse',
+      dedupTtlMs: 3600000
+    });
     return { status: 'unknown', error: 'parse' };
   }
 
@@ -136,11 +150,27 @@ async function runUsage(authJsonPath, thresholds, stateDir) {
     }
 
     const detail = `${pct}% used (resets ${w.resetsAt || '?'})`;
-    if (pct >= crit) {
-      delivery.alert('critical', `Quota ${win} critical`, detail);
-    } else if (pct >= warn) {
-      delivery.alert('warning', `Quota ${win} warning`, detail);
+    // Crossings-only alerting (fix a): a warn/crit fires ONCE per crossing.
+    // If the window's status (ok/warn/crit) is unchanged since last cycle we
+    // only log at DEBUG level — no alert, no changelog, no Discord. Recovery
+    // (back below warn) fires an optional info + resets the tracked status.
+    const status = classifyQuota(pct, warn, crit);
+    const prevStatus = quotaStatus[win] || 'unknown';
+    const transition = quotaTransition(prevStatus, status);
+    if (transition.alert) {
+      if (transition.recovery) {
+        delivery.alert(
+          'info',
+          `Quota ${win} recovered`,
+          `${pct}% used — back below threshold (resets ${w.resetsAt || '?'})`
+        );
+      } else {
+        delivery.alert(transition.level, `Quota ${win} ${transition.level}`, detail);
+      }
+    } else {
+      delivery.debug(`Quota ${win} still ${status} (${pct}%) — no crossing, skipping alert`);
     }
+    quotaStatus[win] = status;
   }
 
   // Persist the time-series: append this cycle's sample, prune anything older
@@ -161,9 +191,65 @@ async function runUsage(authJsonPath, thresholds, stateDir) {
     } catch (_) {
       // best effort
     }
+    // Persist the crossing-tracking status alongside the time-series.
+    try {
+      if (quotaStatusFile) fs.writeFileSync(quotaStatusFile, JSON.stringify(quotaStatus));
+    } catch (_) {
+      // best effort
+    }
   }
 
   return { status: 'ok', usage };
 }
 
-module.exports = { runUsage };
+// --- Crossings-only quota status helpers (fix a) ---------------------------
+//
+// Best-effort load/save of the per-window status map { win: 'ok'|'warn'|'crit' }
+// used to detect genuine threshold CROSSINGS (so a warn/crit alert fires once
+// per crossing, not every cycle). Never throws.
+
+function loadQuotaStatus(file) {
+  try {
+    const raw = fs.readFileSync(file, 'utf8');
+    const obj = JSON.parse(raw);
+    return obj && typeof obj === 'object' ? obj : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function saveQuotaStatus(file, status) {
+  try {
+    if (file) fs.writeFileSync(file, JSON.stringify(status));
+  } catch (_) {
+    // best effort
+  }
+}
+
+// Classify a window's percent into a coarse status for crossing detection.
+function classifyQuota(pct, warn, crit) {
+  if (typeof pct !== 'number' || isNaN(pct)) return 'unknown';
+  if (pct >= crit) return 'crit';
+  if (pct >= warn) return 'warn';
+  return 'ok';
+}
+
+// Decide what to do on a status transition between cycles. Same status -> no
+// alert (caller logs DEBUG). A change into warn/crit alerts at that level; a
+// change back to ok (from warn/crit) is a recovery (optional info). The very
+// first sighting (prev 'unknown') alerts only when there is something to say
+// (warn/crit) and stays silent when nominal. Never throws.
+function quotaTransition(prev, next) {
+  if (prev === next) return { alert: false };
+  if (prev === 'unknown') {
+    if (next === 'crit') return { alert: true, level: 'critical' };
+    if (next === 'warn') return { alert: true, level: 'warning' };
+    return { alert: false };
+  }
+  if (next === 'crit') return { alert: true, level: 'critical' };
+  if (next === 'warn') return { alert: true, level: 'warning' };
+  // next === 'ok' -> recovery from warn/crit
+  return { alert: true, level: 'info', recovery: true };
+}
+
+module.exports = { runUsage, loadQuotaStatus, saveQuotaStatus, classifyQuota, quotaTransition };

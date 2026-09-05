@@ -15,12 +15,48 @@ const SUB = { name: 's' };
 const DISCORD_URL = 'https://discord.com/api/webhooks/123/abc';
 const SLACK_URL = 'https://hooks.slack.com/services/T/B/X';
 
-test('Discord payload uses { content }, Slack uses { text }', () => {
+test('Discord payload uses { content, embeds } with color, Slack uses { text }', () => {
   const d = delivery.buildSubscriberDelivery(SUB, DISCORD_URL, 'warning', 'Title', 'Msg');
-  assert.deepStrictEqual(d.payload, { content: '[WARNING] Title — Msg', username: 'model-monitor' });
+  // Fix (c): embed-eligible levels send a rich embed with a non-empty content
+  // fallback (Discord requires content) so the post is always valid.
+  assert.ok(Array.isArray(d.payload.embeds), 'Discord payload must include embeds');
+  assert.strictEqual(d.payload.embeds.length, 1, 'exactly one embed');
+  assert.strictEqual(d.payload.embeds[0].color, 0xf1c40f, 'warning color is amber');
+  assert.strictEqual(d.payload.embeds[0].description, 'Msg');
+  assert.strictEqual(d.payload.embeds[0].title, 'Title');
+  assert.ok(typeof d.payload.embeds[0].timestamp === 'string', 'embed has a timestamp');
+  assert.ok(d.payload.content.length > 0 && d.payload.content.length <= 1900, 'non-empty content fallback');
+  assert.strictEqual(d.payload.username, 'model-monitor');
 
   const s = delivery.buildSubscriberDelivery(SUB, SLACK_URL, 'warning', 'Title', 'Msg');
   assert.deepStrictEqual(s.payload, { text: '[WARNING] Title — Msg' });
+});
+
+test('embed colors map to status (model_change green / critical red)', () => {
+  const mc = delivery.buildSubscriberDelivery(SUB, DISCORD_URL, 'model_change', 'M', 'msg');
+  assert.strictEqual(mc.payload.embeds[0].color, 0x2ecc71, 'model_change green');
+  const crit = delivery.buildSubscriberDelivery(SUB, DISCORD_URL, 'critical', 'C', 'msg');
+  assert.strictEqual(crit.payload.embeds[0].color, 0xe74c3c, 'critical red');
+});
+
+test('embed respects field + total limits (<=5 fields, content<=1900)', () => {
+  const fields = [];
+  for (let i = 0; i < 8; i++) fields.push({ name: 'n' + i, value: 'v' + i });
+  const payload = delivery.buildDiscordPayload('warning', 'fallback text', {
+    title: 'T',
+    description: 'desc',
+    fields
+  });
+  assert.strictEqual(payload.embeds[0].fields.length, 5, 'fields capped at 5');
+  assert.ok(payload.content.length > 0 && payload.content.length <= 1900, 'content within 1900');
+  const total = JSON.stringify(payload).length;
+  assert.ok(total <= 6000, 'total envelope within 6000, got ' + total);
+});
+
+test('embed content is non-empty even when description would be empty', () => {
+  const payload = delivery.buildDiscordPayload('warning', 'fallback', { title: 'T', description: '' });
+  assert.ok(payload.content.length > 0, 'content fallback present');
+  assert.strictEqual(payload.embeds[0].description, '', 'empty description preserved');
 });
 
 test('model-change table chunk respects the 1900-char cap and paginates', () => {

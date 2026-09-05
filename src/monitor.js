@@ -176,7 +176,7 @@ async function main() {
     // Rotate alerts.log at the top of every cycle so a continuous run caps it
     // even if the process is never restarted.
     maybeRotateAlertsLog(stateDir);
-    await delivery.alert('info', 'Monitor cycle started', new Date().toISOString(), { noChangelog: true });
+    await delivery.alert('info', 'Monitor cycle started', new Date().toISOString(), { debugOnly: true });
 
     const pricing = await runPriceWatch(stateDir).catch((e) => ({
       status: 'unknown',
@@ -196,7 +196,10 @@ async function main() {
     try {
       pins = runConfigScan(config.scanRoots, latestModels);
     } catch (e) {
-      await delivery.alert('warning', 'config-scan failed', String(e && e.message ? e.message : e));
+      await delivery.alert('warning', 'config-scan failed', String(e && e.message ? e.message : e), {
+        dedupKey: 'monitor:config-scan',
+        dedupTtlMs: 3600000
+      });
     }
 
     const feedUpdates = [];
@@ -209,7 +212,10 @@ async function main() {
       ]);
       for (const r of results) feedUpdates.push(r);
     } catch (e) {
-      await delivery.alert('warning', 'atom-watch failed', String(e && e.message ? e.message : e));
+      await delivery.alert('warning', 'atom-watch failed', String(e && e.message ? e.message : e), {
+        dedupKey: 'monitor:atom-watch',
+        dedupTtlMs: 3600000
+      });
     }
 
     const report = {
@@ -220,7 +226,7 @@ async function main() {
       feedUpdates
     };
     delivery.writeReport(report);
-    await delivery.alert('info', 'Monitor cycle complete', new Date().toISOString(), { noChangelog: true });
+    await delivery.alert('info', 'Monitor cycle complete', new Date().toISOString(), { debugOnly: true });
     return report;
   }
 
@@ -275,14 +281,20 @@ async function main() {
       .then((p) => {
         if (p && p.models) latestModels = p.models;
       })
-      .catch((e) =>
-        delivery.alert('warning', 'price-watch failed', String(e && e.message ? e.message : e))
-      );
+    .catch((e) =>
+      delivery.alert('warning', 'price-watch failed', String(e && e.message ? e.message : e), {
+        dedupKey: 'monitor:price-watch',
+        dedupTtlMs: 3600000
+      })
+    );
   }, c.pricing);
 
   setInterval(() => {
     runUsage(config.authJsonPath, config.thresholds, stateDir).catch((e) =>
-      delivery.alert('warning', 'usage failed', String(e && e.message ? e.message : e))
+      delivery.alert('warning', 'usage failed', String(e && e.message ? e.message : e), {
+        dedupKey: 'monitor:usage',
+        dedupTtlMs: 3600000
+      })
     );
   }, c.usage);
 
@@ -290,7 +302,10 @@ async function main() {
     try {
       runConfigScan(config.scanRoots, latestModels);
     } catch (e) {
-      delivery.alert('warning', 'config-scan failed', String(e && e.message ? e.message : e));
+      delivery.alert('warning', 'config-scan failed', String(e && e.message ? e.message : e), {
+        dedupKey: 'monitor:config-scan',
+        dedupTtlMs: 3600000
+      });
     }
   }, c.db);
 
@@ -298,19 +313,28 @@ async function main() {
   // the (slower) releases cadence. Each call is idempotent via persisted seenIds.
   setInterval(() => {
     runAtomWatch(stateDir, 'goPricing', config.feeds.goPricing).catch((e) =>
-      delivery.alert('warning', 'atom-watch failed: goPricing', String(e && e.message ? e.message : e))
+      delivery.alert('warning', 'atom-watch failed: goPricing', String(e && e.message ? e.message : e), {
+        dedupKey: 'monitor:atom:goPricing',
+        dedupTtlMs: 3600000
+      })
     );
   }, c.atom);
 
   setInterval(() => {
     runAtomWatch(stateDir, 'zenPricing', config.feeds.zenPricing).catch((e) =>
-      delivery.alert('warning', 'atom-watch failed: zenPricing', String(e && e.message ? e.message : e))
+      delivery.alert('warning', 'atom-watch failed: zenPricing', String(e && e.message ? e.message : e), {
+        dedupKey: 'monitor:atom:zenPricing',
+        dedupTtlMs: 3600000
+      })
     );
   }, c.atom);
 
   setInterval(() => {
     runAtomWatch(stateDir, 'releases', config.feeds.releases).catch((e) =>
-      delivery.alert('warning', 'atom-watch failed: releases', String(e && e.message ? e.message : e))
+      delivery.alert('warning', 'atom-watch failed: releases', String(e && e.message ? e.message : e), {
+        dedupKey: 'monitor:atom:releases',
+        dedupTtlMs: 3600000
+      })
     );
   }, c.releases);
 
@@ -320,7 +344,10 @@ async function main() {
     discordDigest
       .postDigest({ stateDir })
       .catch((e) =>
-        delivery.alert('warning', 'discord digest failed', String(e && e.message ? e.message : e))
+        delivery.alert('warning', 'discord digest failed', String(e && e.message ? e.message : e), {
+          dedupKey: 'monitor:discord-digest',
+          dedupTtlMs: 3600000
+        })
       );
   }, DIGEST_INTERVAL_MS);
 
@@ -329,7 +356,7 @@ async function main() {
     'Monitor running (continuous)',
     `usage every ${c.usage}ms, pricing every ${c.pricing}ms, config-scan every ${c.db}ms, ` +
       `atom feeds every ${c.atom}ms, releases every ${c.releases}ms`,
-    { noChangelog: true }
+    { debugOnly: true }
   );
 }
 

@@ -203,7 +203,10 @@ async function runPriceWatch(stateDir) {
   try {
     res = await fetch(API_URL, { headers });
   } catch (e) {
-    delivery.alert('warning', 'Pricing fetch failed', String(e && e.message ? e.message : e));
+    delivery.alert('warning', 'Pricing fetch failed', String(e && e.message ? e.message : e), {
+      dedupKey: 'pricing:fetch',
+      dedupTtlMs: 3600000
+    });
     ensureSnapshotExists(snapFile, e && e.message ? e.message : e);
     return { status: 'unknown', error: String(e && e.message ? e.message : e), models: readSnapshot(snapFile) };
   }
@@ -222,7 +225,10 @@ async function runPriceWatch(stateDir) {
   }
 
   if (!res.ok) {
-    delivery.alert('warning', `Pricing fetch HTTP ${res.status}`, API_URL);
+    delivery.alert('warning', `Pricing fetch HTTP ${res.status}`, API_URL, {
+      dedupKey: 'pricing:http',
+      dedupTtlMs: 3600000
+    });
     ensureSnapshotExists(snapFile, `HTTP ${res.status}`);
     return { status: 'unknown', error: `HTTP ${res.status}`, models: readSnapshot(snapFile) };
   }
@@ -232,7 +238,10 @@ async function runPriceWatch(stateDir) {
   try {
     data = await res.json();
   } catch (e) {
-    delivery.alert('warning', 'Pricing JSON parse failed', String(e && e.message ? e.message : e));
+    delivery.alert('warning', 'Pricing JSON parse failed', String(e && e.message ? e.message : e), {
+      dedupKey: 'pricing:parse',
+      dedupTtlMs: 3600000
+    });
     ensureSnapshotExists(snapFile, 'parse');
     return { status: 'unknown', error: 'parse', models: readSnapshot(snapFile) };
   }
