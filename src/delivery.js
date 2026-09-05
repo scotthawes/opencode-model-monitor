@@ -64,24 +64,56 @@ function normalize(text) {
 }
 
 // Compute a dedup key for a model_change alert. Returns null when the alert
-// does not reference a known model id (no dedup in that case).
+// does not reference a recognizable model id (no dedup in that case).
+//
+// Fix (b): a brand-new model may not yet be in knownModelIds when its first
+// alert fires (e.g. a Go/Zen docs feed "Added model: X" arriving before
+// price-watch refreshes the catalog, or a commit title referencing the id by a
+// slightly different spelling). We therefore ALSO derive the key from model ids
+// parsed directly out of the message text, so the SAME underlying event emitted
+// by two different sources (api diff vs feed) collapses within the TTL.
 function computeDedupKey(title, message) {
-  if (!knownModelIds.size) return null;
   const text = normalize(`${title || ''} ${message || ''}`);
   if (!text) return null;
   // Prefer the longest known id whose normalized form appears in the text,
   // so e.g. "qwen3.8-flash" wins over a shorter ambiguous prefix.
   let bestId = null;
   let bestNorm = '';
-  for (const id of knownModelIds) {
-    const n = normalize(id);
-    if (!n) continue;
-    if (text.includes(n) && n.length > bestNorm.length) {
-      bestId = id;
-      bestNorm = n;
+  if (knownModelIds.size) {
+    for (const id of knownModelIds) {
+      const n = normalize(id);
+      if (!n) continue;
+      if (text.includes(n) && n.length > bestNorm.length) {
+        bestId = id;
+        bestNorm = n;
+      }
     }
   }
-  return bestId ? 'model:' + bestNorm : null;
+  if (bestId) return 'model:' + bestNorm;
+
+  // Fallback: parse candidate model ids straight from the message text.
+  // 1) Explicit structured references we ourselves emit (covers both the api
+  //    diff and the feed phrasing): "Added model: X", "Removed model: X",
+  //    "Cost changed for X: ...", "Tiers changed for X", "Free model ...: X".
+  const explicit = String(message || '').match(
+    /(?:added model|removed model|cost changed for|tiers changed for|free model (?:available|changed|removed)):\s*([a-z0-9][a-z0-9\-\.]*)/i
+  );
+  if (explicit) return 'model:' + normalize(explicit[1]);
+
+  // 2) Generic token scan using the requested model-id shape
+  //    /([a-z0-9][a-z0-9\-\.]*)/i. A model id token carries at least one letter
+  //    AND a digit/hyphen (e.g. "hy3", "qwen3.8-flash", "claude-4"), which
+  //    excludes pure words ("model") and bare numbers ("0175", "45836") that
+  //    would otherwise be mistaken for an id. Longest match wins. We scan a
+  //    space-preserving lowercase copy (NOT the aggressively-normalized `text`,
+  //    which strips spaces and would collapse the whole message into one token).
+  const textLc = (String(title || '') + ' ' + String(message || '')).toLowerCase();
+  const tokens = textLc.match(/[a-z0-9][a-z0-9\-\.]*/g) || [];
+  let bestTok = '';
+  for (const t of tokens) {
+    if (/[a-z]/.test(t) && /[\d\-]/.test(t) && t.length > bestTok.length) bestTok = t;
+  }
+  return bestTok ? 'model:' + normalize(bestTok) : null;
 }
 
 function dedupPath() {
@@ -212,9 +244,72 @@ function appendQuery(url, key, value) {
   return url + sep + key + '=' + encodeURIComponent(value);
 }
 
+// --- Discord embed shaping -------------------------------------------------
+//
+// For model_change / warning / critical / digest we send a Discord EMBED (rich
+// card) instead of a bare code block where beneficial — it reads better in
+// chat and groups related metrics into `fields`. Discord requires a non-empty
+// `content` string on every webhook message, so we ALSO keep a short fallback
+// text (the legacy "[LEVEL] title — message" line) so the post is always valid
+// even on embed-incapable clients. Slack/custom endpoints keep { text }.
+//
+// Hard limits enforced: content <= 1900 chars, each embed description <= 4096,
+// at most 5 fields, and the whole JSON envelope <= 6000 chars. Never throws.
+const EMBED_COLORS = {
+  model_change: 0x2ecc71, // green
+  warning: 0xf1c40f, // amber
+  critical: 0xe74c3c, // red
+  digest: 0x3498db, // blue
+  info: 0x95a5a6 // grey fallback
+};
+const EMBED_LEVELS = { model_change: true, warning: true, critical: true, digest: true };
+
+// Build a Discord webhook payload with an embed. `fallback` is the required
+// non-empty content string; `opts` may carry { title, description, color,
+// fields }. Returns { content, username, embeds } sized within Discord limits.
+function buildDiscordPayload(level, fallback, opts) {
+  opts = opts || {};
+  const color =
+    typeof opts.color === 'number'
+      ? opts.color
+      : EMBED_COLORS[level] != null
+        ? EMBED_COLORS[level]
+        : EMBED_COLORS.info;
+  const fb = String(fallback == null ? '' : fallback);
+  const description = String(opts.description != null ? opts.description : fb);
+  const fields = Array.isArray(opts.fields)
+    ? opts.fields
+        .slice(0, 5)
+        .map((f) => ({
+          name: String(f && f.name != null ? f.name : '').slice(0, 256),
+          value: String(f && f.value != null ? f.value : '').slice(0, 1024),
+          inline: !!(f && f.inline)
+        }))
+    : [];
+  const embeds = [
+    {
+      title: String(opts.title != null ? opts.title : String(level).toUpperCase()).slice(0, 256),
+      description: description.slice(0, 4096),
+      color,
+      fields,
+      timestamp: new Date().toISOString()
+    }
+  ];
+  // Ensure a non-empty content fallback (Discord requires it).
+  let content = fb.length ? fb : String(level).toUpperCase();
+  content = content.length > DISCORD_CONTENT_MAX ? content.slice(0, DISCORD_CONTENT_MAX) : content;
+  // Keep the whole envelope <= 6000 chars by trimming the description last.
+  while (JSON.stringify(embeds).length + content.length > 6000 && embeds[0].description.length > 0) {
+    embeds[0].description = embeds[0].description.slice(0, embeds[0].description.length - 100);
+  }
+  return { content, username: DISCORD_USERNAME, embeds };
+}
+
 // Build the per-subscriber delivery payload + final URL.
-// - Discord (url matches discord.com/api/webhooks): send { content: "[LEVEL]
-//   title — message" } truncated to 2000 chars + a username; Slack/custom keep
+// - Discord (url matches discord.com/api/webhooks): for embed-eligible levels
+//   (model_change / warning / critical / digest) send a rich embed with a
+//   non-empty content fallback; other levels send { content: "[LEVEL] title —
+//   message" } truncated to 2000 chars + a username. Slack/custom keep
 //   { text: "..." } so existing subscribers are unaffected.
 // - Discord FORUM channels need ?thread_name= (new post) or ?thread_id= (reply)
 //   on the webhook URL. The URL is used verbatim, so any query string the user
@@ -226,7 +321,10 @@ function buildSubscriberDelivery(sub, url, level, title, message) {
   const text = `[${String(level).toUpperCase()}] ${title} — ${message}`;
   const isDiscord = DISCORD_WEBHOOK_RE.test(url || '');
   let payload;
-  if (isDiscord) {
+  if (isDiscord && EMBED_LEVELS[level]) {
+    // Rich embed with a non-empty content fallback (Discord requires content).
+    payload = buildDiscordPayload(level, text, { title: title, description: message || title });
+  } else if (isDiscord) {
     payload = {
       content: text.length > DISCORD_CONTENT_MAX ? text.slice(0, DISCORD_CONTENT_MAX) : text,
       username: DISCORD_USERNAME
@@ -247,19 +345,29 @@ function buildSubscriberDelivery(sub, url, level, title, message) {
 
 // Deliver a raw, pre-formatted message body to one subscriber, choosing the
 // Discord { content } vs Slack/custom { text } shape based on the URL (mirrors
-// buildSubscriberDelivery) but WITHOUT the [LEVEL] title prefix. Used by the
-// periodic digest, which posts full report chunks rather than single alerts.
-async function deliverRawContent(sub, content) {
+// buildSubscriberDelivery). When `level` is 'digest' and the endpoint is
+// Discord, the chunk is sent as a rich embed (with the text as a non-empty
+// content fallback) instead of a bare code block. Used by the periodic digest,
+// which posts full report chunks rather than single alerts.
+async function deliverRawContent(sub, content, level) {
   let url = sub.webhookUrl;
   if (!url && sub.webhookEnv) url = process.env[sub.webhookEnv];
   if (!url) return;
   const isDiscord = DISCORD_WEBHOOK_RE.test(url || '');
-  const payload = isDiscord
-    ? {
-        content: content.length > DISCORD_CONTENT_MAX ? content.slice(0, DISCORD_CONTENT_MAX) : content,
-        username: DISCORD_USERNAME
-      }
-    : { text: content };
+  let payload;
+  if (isDiscord && level && EMBED_LEVELS[level]) {
+    // Rich embed with the raw content as both the description and the required
+    // non-empty content fallback.
+    const titleFor = level === 'digest' ? 'Digest' : level === 'model_change' ? 'Model change' : String(level);
+    payload = buildDiscordPayload(level, content, { title: titleFor, description: content });
+  } else if (isDiscord) {
+    payload = {
+      content: content.length > DISCORD_CONTENT_MAX ? content.slice(0, DISCORD_CONTENT_MAX) : content,
+      username: DISCORD_USERNAME
+    };
+  } else {
+    payload = { text: content };
+  }
   if (isDiscord && sub) {
     const hasThreadName = /[?&]thread_name=/i.test(url);
     const hasThreadId = /[?&]thread_id=/i.test(url);
@@ -291,7 +399,7 @@ async function sendToSubscribers(level, content, subscribersOverride) {
   for (const sub of list) {
     try {
       if (!subscriberWants(sub, level)) continue;
-      track(deliverRawContent(sub, content));
+      track(deliverRawContent(sub, content, level));
     } catch (_) {
       // A structurally broken entry must not stop the fan-out.
     }
@@ -479,16 +587,15 @@ function notifyViaNotifier(notifyTitle, notifyMessage) {
   });
 }
 
-// Best-effort WARNING line to alerts.log so desktop delivery gaps are visible.
+// Best-effort DEBUG line (rate-limited to at most one per hour) so desktop
+// delivery gaps are still visible without flooding the log under launchd, where
+// a misconfigured/headless environment can emit a failure on every cycle.
+let lastDesktopWarnTs = 0;
 function logDesktopWarning(detail) {
-  try {
-    fs.appendFileSync(
-      path.join(STATE_DIR, 'alerts.log'),
-      `[${ts()}] WARNING | Desktop delivery failed (${detail})\n`
-    );
-  } catch (_) {
-    // best effort
-  }
+  const now = Date.now();
+  if (now - lastDesktopWarnTs < 3600000) return; // at most one DEBUG per hour
+  lastDesktopWarnTs = now;
+  debug(`Desktop delivery failed (${detail})`);
 }
 
 let CONFIG = null;
@@ -535,6 +642,45 @@ function ts() {
   return new Date().toISOString();
 }
 
+// --- Debug-only logging ----------------------------------------------------
+//
+// Low-signal lifecycle/heartbeat lines (monitor cycle ticks, repeated
+// same-status quota blips) go here instead of alerts.log so the operational log
+// stays focused on actionable signal. Best-effort, never throws, non-blocking.
+function debug(message) {
+  try {
+    const line = `[${ts()}] DEBUG | ${message}`;
+    fs.appendFileSync(path.join(STATE_DIR, 'debug.log'), line + '\n');
+  } catch (_) {
+    // best effort
+  }
+}
+
+// Humanize a reset timestamp into a scannable relative phrase:
+//   "in 3d 4h"  (>= 2 days out)
+//   "tomorrow"   (the next UTC calendar day)
+//   "today"      (later the same UTC calendar day)
+//   "overdue"    (already in the past)
+//   "?"          (unparseable input)
+// Used by report.md + the Discord digest TL;DR so users see "next reset in Xd Yh"
+// instead of a raw ISO string. Never throws.
+function humanizeReset(iso) {
+  const t = Date.parse(iso);
+  if (isNaN(t)) return '?';
+  const now = Date.now();
+  const diff = t - now;
+  if (diff < 0) return 'overdue';
+  const DAY = 864e5;
+  const dNow = new Date(now).toISOString().slice(0, 10);
+  const dTs = new Date(t).toISOString().slice(0, 10);
+  if (dNow === dTs) return 'today';
+  const dTomorrow = new Date(now + DAY).toISOString().slice(0, 10);
+  if (dTs === dTomorrow) return 'tomorrow';
+  const days = Math.floor(diff / DAY);
+  const hours = Math.floor((diff - days * DAY) / 3600000);
+  return `in ${days}d ${hours}h`;
+}
+
 // level: info | model_change | warning | critical
 // opts.noChangelog (bool) — when true, the alert is delivered (log file /
 // stdout / desktop / webhook) but NOT recorded to the persistent changelog.
@@ -542,6 +688,14 @@ function ts() {
 // changes rather than every 5-minute cycle tick.
 async function alert(level, title, message, opts) {
   ensureConfig();
+
+  // DEBUG-only mode: low-signal lines (monitor heartbeats, repeated same-status
+  // quota blips) go to the debug log and NOTHING else — no alerts.log, no
+  // changelog, no subscribers, no webhook, no desktop. Never throws.
+  if (opts && opts.debugOnly) {
+    debug(`${String(level).toUpperCase()} | ${title} | ${message}`);
+    return { delivered: true, debugOnly: true };
+  }
 
   // Dedup cross-source model_change alerts within the TTL window. Other
   // levels (info/config pins, warning, critical) are delivered as-is unless the
@@ -553,7 +707,7 @@ async function alert(level, title, message, opts) {
     if (key) {
       const now = Date.now();
       const prev = dedupStore.get(key);
-      if (prev != null && now - prev < dedupTtlMs) {
+      if (prev != null && now - prev < (opts && typeof opts.dedupTtlMs === 'number' ? opts.dedupTtlMs : dedupTtlMs)) {
         return { delivered: false }; // suppressed — already alerted for this model within TTL
       }
       dedupStore.set(key, now);
@@ -686,25 +840,29 @@ async function alert(level, title, message, opts) {
   // Persistent subscriber fan-out. For every subscriber whose `levels` filter
   // includes this alert's level, POST an alert to its webhook URL (resolved
   // directly, or via a webhookEnv env var so the secret never lives in
-  // subscribers.json). Discord webhooks receive { content: "..." } (truncated to
-  // 2000 chars); Slack/custom endpoints receive the original { text: "..." }.
-  // Forum-channel thread params (?thread_name=/?thread_id=) pass through
-  // verbatim. Fully best-effort: timeouts and other failures are logged as
-  // WARNING and never thrown, and a malformed entry is skipped so one bad
-  // subscriber can't break alert delivery.
-  for (const sub of SUBSCRIBERS) {
-    try {
-      if (!sub || !Array.isArray(sub.levels) || !sub.levels.includes(level)) continue;
-      let url = sub.webhookUrl;
-      if (!url && sub.webhookEnv) url = process.env[sub.webhookEnv];
-      if (!url) continue; // nothing resolvable to deliver to
-      // When the table path handles Discord presentation, skip only Discord-shaped
-      // endpoints and still deliver the plain line to non-Discord (Slack) ones.
-      if (opts && opts.skipDiscord && DISCORD_WEBHOOK_RE.test(url || '')) continue;
-      const { url: finalUrl, payload } = buildSubscriberDelivery(sub, url, level, title, message);
-      track(deliverToSubscriber(sub, finalUrl, payload));
-    } catch (_) {
-      // A structurally broken entry must not crash the alert path.
+  // subscribers.json). Discord webhooks receive a rich embed (model_change /
+  // warning / critical) or { content: "..." } (truncated to 2000 chars);
+  // Slack/custom endpoints receive the original { text: "..." }. Forum-channel
+  // thread params (?thread_name=/?thread_id=) pass through verbatim. Fully
+  // best-effort: timeouts and other failures are logged as WARNING and never
+  // thrown, and a malformed entry is skipped so one bad subscriber can't break
+  // alert delivery. Skipped entirely when opts.noSubscribers is set (used by
+  // monitor heartbeats, which must stay DEBUG-only and never reach Discord).
+  if (!(opts && opts.noSubscribers)) {
+    for (const sub of SUBSCRIBERS) {
+      try {
+        if (!sub || !Array.isArray(sub.levels) || !sub.levels.includes(level)) continue;
+        let url = sub.webhookUrl;
+        if (!url && sub.webhookEnv) url = process.env[sub.webhookEnv];
+        if (!url) continue; // nothing resolvable to deliver to
+        // When the table path handles Discord presentation, skip only Discord-shaped
+        // endpoints and still deliver the plain line to non-Discord (Slack) ones.
+        if (opts && opts.skipDiscord && DISCORD_WEBHOOK_RE.test(url || '')) continue;
+        const { url: finalUrl, payload } = buildSubscriberDelivery(sub, url, level, title, message);
+        track(deliverToSubscriber(sub, finalUrl, payload));
+      } catch (_) {
+        // A structurally broken entry must not crash the alert path.
+      }
     }
   }
 
@@ -777,10 +935,104 @@ function windowInfo(history, win, now) {
   return { current, oldest: oldestSample, delta: current - oldestSample, oldestTs, daysElapsed };
 }
 
+// Build the 4-line human summary prepended to report.md (fix d): a status
+// emoji, the biggest current risk, the next reset (humanized), and the number
+// of models tracked. Best-effort: any missing data degrades to a calm default.
+function reportSummary(report) {
+  const rep = report || {};
+  const pricing = rep.pricing || {};
+  const models = pricing.models || {};
+  const modelCount = pricing.modelCount != null ? pricing.modelCount : Object.keys(models).length;
+  const usage = rep.usage || {};
+  const usageWin = usage.usage ? usage.usage : usage;
+  const wins = ['rolling', 'weekly', 'monthly'].filter((w) => usageWin[w]);
+
+  let events = [];
+  try {
+    const raw = fs.readFileSync(path.join(STATE_DIR, 'changelog.json'), 'utf8');
+    const arr = JSON.parse(raw);
+    const cutoff = Date.now() - changelogRetentionMs;
+    if (Array.isArray(arr)) events = arr.filter((e) => (e.ts ? Date.parse(e.ts) : 0) >= cutoff);
+  } catch (_) {}
+  const quiet = events.length === 0;
+  const statusEmoji = quiet ? '🟢' : '🔴';
+  const statusText = quiet ? 'All quiet' : `${events.length} change(s)`;
+
+  // Biggest risk: the most severe window at/above a threshold, else a fast
+  // upward 7-day trend that would hit warn within a week, else "nominal".
+  let risk = 'none — all windows nominal';
+  let worst = null;
+  for (const w of wins) {
+    const wi = usageWin[w];
+    if (!wi || typeof wi.percent !== 'number') continue;
+    const pct = wi.percent;
+    const lvl = pct >= 95 ? 'critical' : pct >= 80 ? 'warning' : null;
+    if (
+      lvl &&
+      (!worst ||
+        (lvl === 'critical' && worst.level !== 'critical') ||
+        (lvl === worst.level && pct > worst.pct))
+    ) {
+      worst = { win: w, pct, level: lvl };
+    }
+  }
+  if (worst) {
+    risk = `${worst.win} at ${worst.pct}% (${worst.level})`;
+  } else if (wins.length) {
+    const history = readUsageHistory();
+    const now = Date.now();
+    for (const w of wins) {
+      const wi = windowInfo(history, w, now);
+      if (wi && wi.delta != null && wi.delta > 0 && wi.current < 80) {
+        const rate = wi.daysElapsed > 0 ? wi.delta / wi.daysElapsed : 0;
+        if (rate > 0) {
+          const daysToWarn = (80 - wi.current) / rate;
+          if (daysToWarn <= 7) {
+            risk = `${w} trending up (Δ +${wi.delta}/7d, ~${Math.round(daysToWarn)}d to warn)`;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  const headlineWin = wins.includes('monthly') ? 'monthly' : wins[wins.length - 1];
+  let nextResetIso =
+    headlineWin && usageWin[headlineWin] && usageWin[headlineWin].resetsAt
+      ? usageWin[headlineWin].resetsAt
+      : null;
+  if (!nextResetIso) {
+    let soonest = null;
+    for (const w of wins) {
+      const r = usageWin[w] && usageWin[w].resetsAt;
+      if (r) {
+        const t = Date.parse(r);
+        if (!isNaN(t) && (!soonest || t < soonest)) soonest = t;
+      }
+    }
+    nextResetIso = soonest ? new Date(soonest).toISOString() : null;
+  }
+  const resetStr = nextResetIso
+    ? humanizeReset(nextResetIso) + (headlineWin ? ` (${headlineWin})` : '')
+    : 'n/a';
+
+  return [
+    `${statusEmoji} ${statusText}`,
+    `⚠️ Biggest risk: ${risk}`,
+    `🔄 Next reset: ${resetStr}`,
+    `📊 Models tracked: ${modelCount}`
+  ];
+}
+
 function renderMarkdown(report) {
   const lines = [];
   const now = Date.now();
   const history = readUsageHistory();
+  // Fix d: prepend a 4-line human summary so the report opens with the status,
+  // biggest risk, next reset (humanized), and model count at a glance.
+  const summary = reportSummary(report);
+  for (const s of summary) lines.push(s);
+  lines.push('');
   lines.push('# OpenCode Model Monitor — Report');
   lines.push('');
   lines.push(`Generated: ${report.generatedAt || 'unknown'}`);
@@ -877,7 +1129,7 @@ function renderMarkdown(report) {
       const w = usageWin[win];
       if (!w) continue;
       const pct = w.percent != null ? w.percent + '%' : '?';
-      const resets = w.resetsAt ? ` (resets ${w.resetsAt})` : '';
+      const resets = w.resetsAt ? ` (resets ${humanizeReset(w.resetsAt)})` : '';
       const wi = windowInfo(history, win, now);
       let deltaStr = '';
       if (wi && wi.delta != null) {
@@ -982,7 +1234,7 @@ function renderMarkdown(report) {
   for (const win of ['rolling', 'weekly', 'monthly']) {
     const w = upcomingUsage[win];
     if (w && w.resetsAt) {
-      lines.push(`- ${win} resets: ${w.resetsAt}`);
+      lines.push(`- ${win} resets: ${humanizeReset(w.resetsAt)}`);
       anyReset = true;
     }
   }
@@ -1268,17 +1520,20 @@ async function deliverModelChangeTableToDiscord(content) {
       if (!url && sub.webhookEnv) url = process.env[sub.webhookEnv];
       if (!url) continue;
       if (!DISCORD_WEBHOOK_RE.test(url)) continue; // non-Discord subscribers keep the plain line
-      track(deliverRawContent(sub, finalContent));
+      // Discord gets a rich embed; the table content doubles as the fallback.
+      track(deliverRawContent(sub, finalContent, 'model_change'));
     } catch (_) {
       // best effort
     }
   }
   if (CONFIG && CONFIG.webhook && DISCORD_WEBHOOK_RE.test(CONFIG.webhook || '')) {
+    // A Discord-shaped legacy webhook also receives the embed.
     track(
-      deliverToSubscriber({ name: 'webhook' }, CONFIG.webhook, {
-        content: finalContent,
-        username: DISCORD_USERNAME
-      })
+      deliverToSubscriber(
+        { name: 'webhook' },
+        CONFIG.webhook,
+        buildDiscordPayload('model_change', finalContent, { title: 'Model change', description: finalContent })
+      )
     );
   }
 }
@@ -1290,7 +1545,10 @@ async function deliverDigestToWebhook(content) {
   if (!CONFIG || !CONFIG.webhook) return;
   const finalContent =
     content.length > DISCORD_CONTENT_MAX ? content.slice(0, DISCORD_CONTENT_MAX) : content;
-  track(postToWebhook(CONFIG.webhook, { level: 'digest', content: finalContent, ts: ts() }));
+  const payload = DISCORD_WEBHOOK_RE.test(CONFIG.webhook || '')
+    ? buildDiscordPayload('digest', finalContent, { title: 'Digest', description: finalContent })
+    : { text: finalContent };
+  track(postToWebhook(CONFIG.webhook, payload));
 }
 
 module.exports = {
@@ -1313,5 +1571,9 @@ module.exports = {
   windowInfo,
   deliverModelChangeTable,
   buildModelChangeChunks,
-  deliverDigestToWebhook
+  deliverDigestToWebhook,
+  computeDedupKey,
+  humanizeReset,
+  debug,
+  buildDiscordPayload
 };
