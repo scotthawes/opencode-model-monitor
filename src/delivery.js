@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
+const usageTable = require('./usage-table');
 
 // Delivery channels. Configured once at startup with the user's delivery
 // options + the state directory. All functions are best-effort and never throw.
@@ -812,6 +813,25 @@ function renderMarkdown(report) {
       lines.push('Model metadata (changed):');
       for (const c of withMeta) lines.push(`- ${c.model}: ${metaShort(c.meta)}`);
     }
+    // Effective price (after the $60 credit multiplier) for cost-changed models.
+    // Computed at render time (list x 60/usage-cap) so the raw snapshot stays
+    // unchanged; unknown caps fall back to the default $60 (1x). Additive.
+    const costChanges = p.modelChanges.filter((c) => c.subtype === 'cost');
+    if (costChanges.length) {
+      lines.push('');
+      lines.push('Effective price (after $60 credit multiplier):');
+      lines.push('');
+      lines.push('Effective = list x (60 / usage-cap). Unknown caps default to $60 (1x).');
+      for (const c of costChanges) {
+        const mult = usageTable.effectiveMultiplier(c.model);
+        const eff = usageTable.effectiveCost(c.newCost, c.model);
+        const order = ['input', 'output', 'cache_read', 'cache_write'];
+        const parts = order
+          .filter((k) => eff && Object.prototype.hasOwnProperty.call(eff, k))
+          .map((k) => `${k} ${fmtModelCost(eff[k])}`);
+        lines.push(`- ${c.model}: ${parts.join(' / ')}  (list x${fmtMult(mult)})`);
+      }
+    }
   }
   if (p.modelCount != null) {
     lines.push('');
@@ -1070,10 +1090,21 @@ function providerShort(p) {
   return i >= 0 ? s.slice(i + 1) : s;
 }
 
-// One cost-change table row: "hy3 | 0.0175→0.14 | 0.0725→0.58 | 0.004375→0.035 | ctx 1M · tool+rsn"
+// Format the effective-price multiplier (MONTHLY_CREDIT / usage-cap) for chat:
+// 4 -> "4x", 1 -> "1x", 0.6 -> "0.6x". Missing/NaN becomes an em-dash.
+function fmtMult(m) {
+  const n = Number(m);
+  if (!isFinite(n)) return '—';
+  return parseFloat(n.toFixed(2)).toString() + 'x';
+}
+
+// One cost-change table row: "hy3 | 0.0175→0.14 | 0.0725→0.58 | 0.004375→0.035 | 1x | ctx 1M · tool+rsn"
+// The Eff× column is the effective-price multiplier after the $60 credit (list
+// x 60/usage-cap); computed at render so the raw snapshot stays unchanged.
 function modelChangeRowStr(r) {
   const cell = (k) => `${fmtModelCost(r.oldCost && r.oldCost[k])}→${fmtModelCost(r.newCost && r.newCost[k])}`;
-  return `${truncateModelId(r.model, 22)} | ${cell('input')} | ${cell('output')} | ${cell('cache_read')} | ${metaShort(r.meta)}`;
+  const mult = usageTable.effectiveMultiplier(r.model);
+  return `${truncateModelId(r.model, 22)} | ${cell('input')} | ${cell('output')} | ${cell('cache_read')} | ${fmtMult(mult)} | ${metaShort(r.meta)}`;
 }
 
 function modelChangeLineStr(l) {
@@ -1117,7 +1148,7 @@ function buildModelChangeChunks(rows, lines) {
     chunks.push(body.length > MODEL_TABLE_MAX ? body.slice(0, MODEL_TABLE_MAX) : body);
     return chunks;
   }
-  const tableHeader = 'Model | Input | Output | Cache | Meta';
+   const tableHeader = 'Model | Input | Output | Cache | Eff× | Meta';
   for (let i = 0; i < rows.length; i += MODEL_TABLE_MAX_ROWS) {
     const page = rows.slice(i, i + MODEL_TABLE_MAX_ROWS);
     let body = head(rows.length, lines ? lines.length : 0);

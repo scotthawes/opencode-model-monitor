@@ -1,0 +1,11 @@
+{
+  "_meta": {
+    "description": "Per-model monthly usage cap (USD) used to compute effective price after the $60 credit multiplier. The live api.json catalog carries NO per-model usage-cap field (verified: 'usage' is absent and 'tiers' is null), so this table is the maintained source of truth. Effective price = list price x (MONTHLY_CREDIT / cap).",
+    "defaultCap": 60,
+    "monthlyCredit": 60,
+    "capTiers": [15, 30, 60, 100],
+    "maintained": true,
+    "note": "Add an entry to `models` to override the default $60 cap for a model. Unknown models fall back to the default cap (60 -> 1x effective). Keep this table in sync with opencode-go's real per-model credit caps; it is MANUALLY MAINTAINED (never scraped from HTML docs)."
+  },
+  "models": {}
+}
