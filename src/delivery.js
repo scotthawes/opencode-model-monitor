@@ -843,6 +843,18 @@ function renderMarkdown(report) {
     const ph = readPriceHistory().length;
     lines.push(`Price history: ${ph} sample${ph === 1 ? '' : 's'}`);
   }
+  // Free models (Zen / *-free) — P1-2, #51. Additive section: announces zero-cost
+  // Zen models separately from the billable diff so cost is never overstated.
+  lines.push('');
+  lines.push('## Free models (Zen / *-free)');
+  lines.push('');
+  const freeIds = Array.isArray(p.freeModels) ? p.freeModels : [];
+  if (!freeIds.length) {
+    lines.push('No free (`*-free` / zero-cost) Zen models detected.');
+  } else {
+    lines.push(`${freeIds.length} free model(s) available:`);
+    for (const id of freeIds) lines.push(`- 🆓 ${id}`);
+  }
   lines.push('');
 
   // Usage
@@ -1115,6 +1127,14 @@ function modelChangeLineStr(l) {
   }
   if (l.subtype === 'removed') return `⚫ ${l.model} REMOVED  ·  ${meta}`;
   if (l.subtype === 'tiers') return `⚪ ${l.model} TIERS changed  ·  ${meta}`;
+  if (l.subtype === 'free') {
+    // 🆓 announces a free Zen model; removal/change use distinct markers so the
+    // Discord table stays scannable. Additive — never alters billable rows.
+    const tag = l.reason === 'removed' ? '⚫' : l.reason === 'changed' ? '🟡' : '🆓';
+    const label =
+      l.reason === 'removed' ? 'FREE REMOVED' : l.reason === 'changed' ? 'FREE CHANGED' : 'FREE available';
+    return `${tag} ${l.model} ${label}  ·  ${meta}`;
+  }
   return `• ${l.model} ${l.subtype || 'changed'}  ·  ${meta}`;
 }
 
@@ -1127,6 +1147,11 @@ function modelChangeHumanMessage(ch) {
   if (ch.subtype === 'added') return `Added model: ${ch.model}`;
   if (ch.subtype === 'removed') return `Removed model: ${ch.model}`;
   if (ch.subtype === 'tiers') return `Tiers changed for ${ch.model}`;
+  if (ch.subtype === 'free') {
+    if (ch.reason === 'removed') return `Free model removed: ${ch.model}`;
+    if (ch.reason === 'changed') return `Free model changed: ${ch.model}`;
+    return `Free model available: ${ch.model}`;
+  }
   return `Model changed: ${ch.model}`;
 }
 

@@ -116,9 +116,28 @@ function extractModelMeta(m) {
   };
 }
 
+// A model is "free" when its id ends in `-free`/`:free` (the opencode Zen
+// naming convention) or its cost is explicitly zero. Used by the additive
+// Zen free-model track (P1-2, #51) so free models are announced but never
+// counted as billable in the opencode-go cost/tiers diff.
+function isFreeModel(id, m) {
+  m = m || {};
+  const norm = String(id == null ? '' : id).toLowerCase();
+  if (norm.endsWith('-free') || norm.endsWith(':free')) return true;
+  const c = m.cost;
+  if (c != null) {
+    if (typeof c === 'number') return c === 0;
+    if (typeof c === 'object') {
+      const vals = Object.values(c).filter((x) => typeof x === 'number');
+      if (vals.length && vals.every((x) => x === 0)) return true;
+    }
+  }
+  return false;
+}
+
 // Fetches the authoritative pricing catalog for the opencode-go provider,
 // diffs it against the previous snapshot, and alerts on any model change.
-// Returns { status, models, changes, modelCount, error }.
+// Returns { status, models, changes, modelCount, error, freeModels }.
 async function runPriceWatch(stateDir) {
   const etagFile = path.join(stateDir, '.etag-pricing');
   const snapFile = path.join(stateDir, 'pricing-snapshot.json');
@@ -141,7 +160,16 @@ async function runPriceWatch(stateDir) {
   }
 
   if (res.status === 304) {
-    return { status: 'unchanged', models: readSnapshot(snapFile), changes: [] };
+    // Catalog unchanged: surface the previously persisted free-model list (it is
+    // already in the snapshot) so the report/Discord views stay accurate every
+    // cycle without re-scanning the unchanged catalog.
+    const snap = readSnapshot(snapFile);
+    return {
+      status: 'unchanged',
+      models: snap,
+      changes: [],
+      freeModels: Array.isArray(snap.freeModels) ? Object.keys(snap.freeModels) : []
+    };
   }
 
   if (!res.ok) {
@@ -182,6 +210,25 @@ async function runPriceWatch(stateDir) {
     modelsMap[id] = { cost: m.cost || null, tiers: m.tiers || null, meta: extractModelMeta(m) };
   }
 
+  // --- Zen (opencode) free-model detection (P1-2, #51) -----------------------
+  //
+  // ADDITIVE and fully independent of the opencode-go cost/tiers diff above: the
+  // opencode `opencode` (Zen) key carries its own model catalog, and some entries
+  // are free (`*-free` / `:free` id, or an explicitly zero cost). We track those
+  // separately in the snapshot (a top-level `freeModels` map) so the billable
+  // diff is never affected and free models are never overstated as cost. Free
+  // models are flagged here (not in the opencode-go loop) so a model cannot be
+  // double-counted as both billable and free.
+  const zen = (data && data['opencode']) || null;
+  const zenModelsRaw = (zen && zen.models) || {};
+  const freeModels = {};
+  for (const id of Object.keys(zenModelsRaw)) {
+    const m = zenModelsRaw[id] || {};
+    if (isFreeModel(id, m)) {
+      freeModels[id] = { cost: m.cost || null, tiers: m.tiers || null, meta: extractModelMeta(m) };
+    }
+  }
+
   let prev = {};
   let prevValid = true;
   let snapExisted = false;
@@ -197,6 +244,17 @@ async function runPriceWatch(stateDir) {
     prevValid = !snapExisted;
     prev = {};
   }
+
+  // The previous free-model list lives under a top-level `freeModels` snapshot
+  // key. Strip it before the cost/tiers diff below so it is never mistaken for a
+  // billable opencode-go model entry (which would spuriously report every free
+  // model as added/removed). Only trust a prior free list when the snapshot was
+  // valid; a corrupt/placeholder snapshot is treated as no-diff (no free flood).
+  const prevFree =
+    prevValid && prev && typeof prev === 'object' && prev.freeModels && typeof prev.freeModels === 'object'
+      ? prev.freeModels
+      : {};
+  if (prev && typeof prev === 'object' && prev.freeModels != null) delete prev.freeModels;
 
   const prevIds = prevValid ? new Set(Object.keys(prev)) : new Set();
   const newIds = new Set(Object.keys(modelsMap));
@@ -239,8 +297,50 @@ async function runPriceWatch(stateDir) {
     );
   }
 
+  // --- Free-model diff (additive, independent of the cost/tiers diff) --------
+  // Emits a non-fatal `model_change` notice for free Zen models: "Free model
+  // available: <id>" on add, "Free model changed: <id>" when a tracked free
+  // model's cost definition changes, and "Free model removed: <id>" on removal.
+  // These ride along in the same aggregated Discord table as billable changes
+  // (rendered with the 🆓 marker) and are deduped per-model via the existing
+  // `model:` prefix store. Suppressed entirely when the prior snapshot was
+  // invalid (same no-diff discipline as the billable path).
+  const freeChanges = [];
+  if (prevValid) {
+    const prevFreeIds = new Set(Object.keys(prevFree));
+    const newFreeIds = new Set(Object.keys(freeModels));
+    for (const id of newFreeIds) {
+      if (!prevFreeIds.has(id)) {
+        freeChanges.push({ subtype: 'free', reason: 'available', model: id, meta: (freeModels[id] || {}).meta || null });
+      } else {
+        const a = prevFree[id] || {};
+        const b = freeModels[id] || {};
+        if (JSON.stringify(a.cost) !== JSON.stringify(b.cost)) {
+          freeChanges.push({ subtype: 'free', reason: 'changed', model: id, meta: (freeModels[id] || {}).meta || null });
+        }
+      }
+    }
+    for (const id of prevFreeIds) {
+      if (!newFreeIds.has(id)) {
+        freeChanges.push({ subtype: 'free', reason: 'removed', model: id, meta: (prevFree[id] || {}).meta || null });
+      }
+    }
+  }
+  for (const fc of freeChanges) {
+    if (fc.reason === 'removed') changes.push(`Free model removed: ${fc.model}`);
+    else if (fc.reason === 'changed') changes.push(`Free model changed: ${fc.model}`);
+    else changes.push(`Free model available: ${fc.model}`);
+    modelChanges.push(fc);
+  }
+
   try {
-    fs.writeFileSync(snapFile, JSON.stringify(modelsMap, null, 2));
+    // Persist opencode-go models plus the independent free-model list. The
+    // top-level `freeModels` key is stripped before the cost/tiers diff on the
+    // next run (see prevFree handling above), so the billable comparison is
+    // never perturbed by its presence here.
+    const snapshot = Object.assign({}, modelsMap);
+    snapshot.freeModels = freeModels;
+    fs.writeFileSync(snapFile, JSON.stringify(snapshot, null, 2));
     if (newEtag) fs.writeFileSync(etagFile, newEtag);
   } catch (e) {
     delivery.alert('warning', 'Pricing snapshot save failed', String(e && e.message ? e.message : e));
@@ -260,6 +360,10 @@ async function runPriceWatch(stateDir) {
   // alerts.log still gets the human-readable single lines, while Discord gets a
   // single aggregated table post (old->new per metric) instead of N one-liners.
   if (modelChanges.length) {
+    // Ensure free-model ids are recognized for per-model dedup (the existing
+    // `model:` prefix store) so a free-model re-alert within the TTL window is
+    // suppressed exactly like a billable change — not just on the opencode-go ids.
+    delivery.setKnownModelIds(new Set([...Object.keys(modelsMap), ...Object.keys(freeModels)]));
     delivery.deliverModelChangeTable(modelChanges);
   }
 
@@ -268,7 +372,8 @@ async function runPriceWatch(stateDir) {
     models: modelsMap,
     changes,
     modelChanges,
-    modelCount: newIds.size
+    modelCount: newIds.size,
+    freeModels: Object.keys(freeModels)
   };
 }
 
@@ -295,4 +400,4 @@ function isValidSnapshot(obj) {
   });
 }
 
-module.exports = { runPriceWatch, appendPriceHistory, extractModelMeta };
+module.exports = { runPriceWatch, appendPriceHistory, extractModelMeta, isFreeModel };
