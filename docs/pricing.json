@@ -1,6 +1,9 @@
 {
-  "generatedAt": "2026-09-05T20:54:36.373Z",
+  "generatedAt": "2026-09-05T21:13:46.533Z",
   "windowDays": 7,
+  "dailyLabels": [
+    "Sep 5"
+  ],
   "models": [
     {
       "id": "qwen3.7-max",
@@ -99,6 +102,14 @@
         },
         {
           "ts": "2026-09-05T20:32:23.234Z",
+          "output": 7.5,
+          "input": 2.5,
+          "cache_read": 0.5,
+          "cache_write": 3.125
+        }
+      ],
+      "dailySeries": [
+        {
           "output": 7.5,
           "input": 2.5,
           "cache_read": 0.5,
@@ -208,6 +219,14 @@
           "cache_read": 0.006,
           "cache_write": null
         }
+      ],
+      "dailySeries": [
+        {
+          "output": 1.2,
+          "input": 0.3,
+          "cache_read": 0.006,
+          "cache_write": null
+        }
       ]
     },
     {
@@ -307,6 +326,14 @@
         },
         {
           "ts": "2026-09-05T20:32:23.234Z",
+          "output": 0.66,
+          "input": 0.22,
+          "cache_read": 0.007,
+          "cache_write": null
+        }
+      ],
+      "dailySeries": [
+        {
           "output": 0.66,
           "input": 0.22,
           "cache_read": 0.007,
@@ -416,6 +443,14 @@
           "cache_read": 0.05,
           "cache_write": 0.625
         }
+      ],
+      "dailySeries": [
+        {
+          "output": 3,
+          "input": 0.5,
+          "cache_read": 0.05,
+          "cache_write": 0.625
+        }
       ]
     },
     {
@@ -515,6 +550,14 @@
         },
         {
           "ts": "2026-09-05T20:32:23.234Z",
+          "output": 0.2,
+          "input": 0.1,
+          "cache_read": 0.002,
+          "cache_write": null
+        }
+      ],
+      "dailySeries": [
+        {
           "output": 0.2,
           "input": 0.1,
           "cache_read": 0.002,
@@ -624,6 +667,14 @@
           "cache_read": 0.06,
           "cache_write": null
         }
+      ],
+      "dailySeries": [
+        {
+          "output": 1.2,
+          "input": 0.3,
+          "cache_read": 0.06,
+          "cache_write": null
+        }
       ]
     },
     {
@@ -723,6 +774,14 @@
         },
         {
           "ts": "2026-09-05T20:32:23.234Z",
+          "output": 4,
+          "input": 0.95,
+          "cache_read": 0.16,
+          "cache_write": null
+        }
+      ],
+      "dailySeries": [
+        {
           "output": 4,
           "input": 0.95,
           "cache_read": 0.16,
@@ -832,6 +891,14 @@
           "cache_read": 0.26,
           "cache_write": null
         }
+      ],
+      "dailySeries": [
+        {
+          "output": 4.4,
+          "input": 1.4,
+          "cache_read": 0.26,
+          "cache_write": null
+        }
       ]
     },
     {
@@ -931,6 +998,14 @@
         },
         {
           "ts": "2026-09-05T20:32:23.234Z",
+          "output": 1.2,
+          "input": 0.3,
+          "cache_read": 0.03,
+          "cache_write": null
+        }
+      ],
+      "dailySeries": [
+        {
           "output": 1.2,
           "input": 0.3,
           "cache_read": 0.03,
@@ -1040,6 +1115,14 @@
           "cache_read": 0.06,
           "cache_write": null
         }
+      ],
+      "dailySeries": [
+        {
+          "output": 1.2,
+          "input": 0.3,
+          "cache_read": 0.06,
+          "cache_write": null
+        }
       ]
     },
     {
@@ -1139,6 +1222,14 @@
         },
         {
           "ts": "2026-09-05T20:32:23.234Z",
+          "output": 0.66,
+          "input": 0.22,
+          "cache_read": 0.007,
+          "cache_write": null
+        }
+      ],
+      "dailySeries": [
+        {
           "output": 0.66,
           "input": 0.22,
           "cache_read": 0.007,
@@ -1248,6 +1339,14 @@
           "cache_read": 0.19,
           "cache_write": null
         }
+      ],
+      "dailySeries": [
+        {
+          "output": 4,
+          "input": 0.95,
+          "cache_read": 0.19,
+          "cache_write": null
+        }
       ]
     },
     {
@@ -1347,6 +1446,14 @@
         },
         {
           "ts": "2026-09-05T20:32:23.234Z",
+          "output": 6,
+          "input": 2,
+          "cache_read": 0.3,
+          "cache_write": null
+        }
+      ],
+      "dailySeries": [
+        {
           "output": 6,
           "input": 2,
           "cache_read": 0.3,
@@ -1456,6 +1563,14 @@
           "cache_read": 0,
           "cache_write": null
         }
+      ],
+      "dailySeries": [
+        {
+          "output": 0,
+          "input": 0,
+          "cache_read": 0,
+          "cache_write": null
+        }
       ]
     },
     {
@@ -1555,6 +1670,14 @@
         },
         {
           "ts": "2026-09-05T20:32:23.234Z",
+          "output": 0.58,
+          "input": 0.14,
+          "cache_read": 0.035,
+          "cache_write": null
+        }
+      ],
+      "dailySeries": [
+        {
           "output": 0.58,
           "input": 0.14,
           "cache_read": 0.035,
@@ -1664,6 +1787,14 @@
           "cache_read": 0.042,
           "cache_write": null
         }
+      ],
+      "dailySeries": [
+        {
+          "output": 2.501,
+          "input": 0.834,
+          "cache_read": 0.042,
+          "cache_write": null
+        }
       ]
     },
     {
@@ -1763,6 +1894,14 @@
         },
         {
           "ts": "2026-09-05T20:32:23.234Z",
+          "output": 0.66,
+          "input": 0.2,
+          "cache_read": 0.04,
+          "cache_write": null
+        }
+      ],
+      "dailySeries": [
+        {
           "output": 0.66,
           "input": 0.2,
           "cache_read": 0.04,
@@ -1872,6 +2011,14 @@
           "cache_read": 0.02,
           "cache_write": 0.25
         }
+      ],
+      "dailySeries": [
+        {
+          "output": 1.2,
+          "input": 0.2,
+          "cache_read": 0.02,
+          "cache_write": 0.25
+        }
       ]
     },
     {
@@ -1971,6 +2118,14 @@
         },
         {
           "ts": "2026-09-05T20:32:23.234Z",
+          "output": 15,
+          "input": 3,
+          "cache_read": 0.3,
+          "cache_write": null
+        }
+      ],
+      "dailySeries": [
+        {
           "output": 15,
           "input": 3,
           "cache_read": 0.3,
@@ -2080,6 +2235,14 @@
           "cache_read": 0.015,
           "cache_write": null
         }
+      ],
+      "dailySeries": [
+        {
+          "output": 0.25,
+          "input": 0.075,
+          "cache_read": 0.015,
+          "cache_write": null
+        }
       ]
     },
     {
@@ -2179,6 +2342,14 @@
         },
         {
           "ts": "2026-09-05T20:32:23.234Z",
+          "output": 0.2,
+          "input": 0.1,
+          "cache_read": 0.002,
+          "cache_write": null
+        }
+      ],
+      "dailySeries": [
+        {
           "output": 0.2,
           "input": 0.1,
           "cache_read": 0.002,
@@ -2288,6 +2459,14 @@
           "cache_read": 0.2,
           "cache_write": null
         }
+      ],
+      "dailySeries": [
+        {
+          "output": 3,
+          "input": 1,
+          "cache_read": 0.2,
+          "cache_write": null
+        }
       ]
     },
     {
@@ -2387,6 +2566,14 @@
         },
         {
           "ts": "2026-09-05T20:32:23.234Z",
+          "output": 0.47,
+          "input": 0.15,
+          "cache_read": 0.016,
+          "cache_write": 0.2
+        }
+      ],
+      "dailySeries": [
+        {
           "output": 0.47,
           "input": 0.15,
           "cache_read": 0.016,
@@ -2496,6 +2683,14 @@
           "cache_read": 0.5,
           "cache_write": null
         }
+      ],
+      "dailySeries": [
+        {
+          "output": 6,
+          "input": 2,
+          "cache_read": 0.5,
+          "cache_write": null
+        }
       ]
     },
     {
@@ -2595,6 +2790,14 @@
         },
         {
           "ts": "2026-09-05T20:32:23.234Z",
+          "output": 3.2,
+          "input": 1,
+          "cache_read": 0.2,
+          "cache_write": null
+        }
+      ],
+      "dailySeries": [
+        {
           "output": 3.2,
           "input": 1,
           "cache_read": 0.2,
@@ -2704,6 +2907,14 @@
           "cache_read": 0.08,
           "cache_write": null
         }
+      ],
+      "dailySeries": [
+        {
+          "output": 2,
+          "input": 0.4,
+          "cache_read": 0.08,
+          "cache_write": null
+        }
       ]
     },
     {
@@ -2803,6 +3014,14 @@
         },
         {
           "ts": "2026-09-05T20:32:23.234Z",
+          "output": 6,
+          "input": 2,
+          "cache_read": 0.25,
+          "cache_write": 2.5
+        }
+      ],
+      "dailySeries": [
+        {
           "output": 6,
           "input": 2,
           "cache_read": 0.25,
@@ -2912,6 +3131,14 @@
           "cache_read": 0.1,
           "cache_write": null
         }
+      ],
+      "dailySeries": [
+        {
+          "output": 3,
+          "input": 0.6,
+          "cache_read": 0.1,
+          "cache_write": null
+        }
       ]
     },
     {
@@ -3011,6 +3238,14 @@
         },
         {
           "ts": "2026-09-05T20:32:23.234Z",
+          "output": 4.4,
+          "input": 1.4,
+          "cache_read": 0.26,
+          "cache_write": null
+        }
+      ],
+      "dailySeries": [
+        {
           "output": 4.4,
           "input": 1.4,
           "cache_read": 0.26,
@@ -3120,6 +3355,14 @@
           "cache_read": 0.04,
           "cache_write": 0.5
         }
+      ],
+      "dailySeries": [
+        {
+          "output": 1.6,
+          "input": 0.4,
+          "cache_read": 0.04,
+          "cache_write": 0.5
+        }
       ]
     },
     {
@@ -3219,6 +3462,14 @@
         },
         {
           "ts": "2026-09-05T20:32:23.234Z",
+          "output": 1.98,
+          "input": 0.66,
+          "cache_read": 0.022,
+          "cache_write": null
+        }
+      ],
+      "dailySeries": [
+        {
           "output": 1.98,
           "input": 0.66,
           "cache_read": 0.022,
@@ -3328,6 +3579,14 @@
           "cache_read": 0.26,
           "cache_write": null
         }
+      ],
+      "dailySeries": [
+        {
+          "output": 4.4,
+          "input": 1.4,
+          "cache_read": 0.26,
+          "cache_write": null
+        }
       ]
     },
     {
@@ -3427,6 +3686,14 @@
         },
         {
           "ts": "2026-09-05T20:32:23.234Z",
+          "output": 0.28,
+          "input": 0.14,
+          "cache_read": 0.0028,
+          "cache_write": null
+        }
+      ],
+      "dailySeries": [
+        {
           "output": 0.28,
           "input": 0.14,
           "cache_read": 0.0028,
@@ -3536,6 +3803,14 @@
           "cache_read": 0.003625,
           "cache_write": null
         }
+      ],
+      "dailySeries": [
+        {
+          "output": 0.87,
+          "input": 0.435,
+          "cache_read": 0.003625,
+          "cache_write": null
+        }
       ]
     },
     {
@@ -3635,6 +3910,14 @@
         },
         {
           "ts": "2026-09-05T20:32:23.234Z",
+          "output": 1.2,
+          "input": 0.2,
+          "cache_read": 0.02,
+          "cache_write": 0.25
+        }
+      ],
+      "dailySeries": [
+        {
           "output": 1.2,
           "input": 0.2,
           "cache_read": 0.02,
