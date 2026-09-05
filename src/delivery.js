@@ -804,6 +804,10 @@ function renderMarkdown(report) {
   if (p.modelCount != null) {
     lines.push('');
     lines.push(`Models tracked: ${p.modelCount}`);
+  }
+  // Always surface the persisted time-series length so trends stay visible even
+  // on the common 304 Not Modified cycle (which carries no modelCount).
+  {
     const ph = readPriceHistory().length;
     lines.push(`Price history: ${ph} sample${ph === 1 ? '' : 's'}`);
   }
