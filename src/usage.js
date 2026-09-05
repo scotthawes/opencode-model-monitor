@@ -145,11 +145,11 @@ async function runUsage(authJsonPath, thresholds, stateDir) {
         'info',
         'Quota ' + win + ' changed',
         pct + '% used (was ' + prev + '%, ' + (delta > 0 ? '+' : '') + delta +
-          'pts) (resets ' + (w.resetsAt || '?') + ')'
+          'pts) (resets ' + (delivery.humanizeReset(w.resetsAt) || '?') + ')'
       );
     }
 
-    const detail = `${pct}% used (resets ${w.resetsAt || '?'})`;
+    const detail = `${pct}% used (resets ${delivery.humanizeReset(w.resetsAt) || '?'})`;
     // Crossings-only alerting (fix a): a warn/crit fires ONCE per crossing.
     // If the window's status (ok/warn/crit) is unchanged since last cycle we
     // only log at DEBUG level — no alert, no changelog, no Discord. Recovery
@@ -162,7 +162,7 @@ async function runUsage(authJsonPath, thresholds, stateDir) {
         delivery.alert(
           'info',
           `Quota ${win} recovered`,
-          `${pct}% used — back below threshold (resets ${w.resetsAt || '?'})`
+          `${pct}% used — back below threshold (resets ${delivery.humanizeReset(w.resetsAt) || '?'})`
         );
       } else {
         delivery.alert(transition.level, `Quota ${win} ${transition.level}`, detail);

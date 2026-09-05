@@ -108,6 +108,38 @@ test('runUsage fires a warn alert exactly once per crossing; repeat is DEBUG', a
   }
 });
 
+test('quota alert message humanizes the reset timestamp (no raw ISO)', async () => {
+  const d = tmpDir();
+  try {
+    delivery.configure({ logFile: false, reportFile: false, stdout: false, desktop: false, webhook: null }, d);
+    delivery.setSubscribers([]);
+    delivery.init(d, {});
+    fs.writeFileSync(path.join(d, 'auth.json'), JSON.stringify({ 'opencode-go': { key: 'test' } }));
+
+    const resetsAt = new Date(Date.now() + 3 * 864e5 + 4 * 3600e3).toISOString();
+    const mk = (pct) => ({
+      rolling: { percent: pct, resetsAt },
+      weekly: { percent: 10 },
+      monthly: { percent: 10 }
+    });
+    const fakeRes = (pct) => ({ ok: true, json: async () => ({ usage: mk(pct) }) });
+    const origFetch = global.fetch;
+
+    // First sighting at 85% (>= warn 80) -> a warning crossing fires.
+    global.fetch = async () => fakeRes(85);
+    await usage.runUsage(path.join(d, 'auth.json'), { warning: 80, critical: 95 }, d);
+
+    const changelog = JSON.parse(fs.readFileSync(path.join(d, 'changelog.json'), 'utf8'));
+    const warn = changelog.find((e) => /Quota rolling warning/.test(e.title));
+    assert.ok(warn, 'expected a quota warning entry in the changelog');
+    assert.ok(/resets (in 3d|today|tomorrow|overdue)/.test(warn.message), 'reset not humanized: ' + warn.message);
+    assert.ok(!/T\d\d:\d\d:\d\d/.test(warn.message), 'raw ISO timestamp leaked into alert: ' + warn.message);
+    global.fetch = origFetch;
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // (b) New-model dedup across sources
 // ---------------------------------------------------------------------------

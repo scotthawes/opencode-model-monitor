@@ -356,10 +356,14 @@ async function deliverRawContent(sub, content, level) {
   const isDiscord = DISCORD_WEBHOOK_RE.test(url || '');
   let payload;
   if (isDiscord && level && EMBED_LEVELS[level]) {
-    // Rich embed with the raw content as both the description and the required
-    // non-empty content fallback.
+    // Rich embed: the FULL content goes in the embed description, while the
+    // required (Discord-mandatory) non-empty `content` fallback is kept SHORT
+    // — just the first line — so the same text is not duplicated in both
+    // fields. We fall back to "See embed" when the body is blank.
     const titleFor = level === 'digest' ? 'Digest' : level === 'model_change' ? 'Model change' : String(level);
-    payload = buildDiscordPayload(level, content, { title: titleFor, description: content });
+    const firstLine = String(content).split('\n')[0].trim();
+    const shortFallback = firstLine.length ? firstLine : 'See embed';
+    payload = buildDiscordPayload(level, shortFallback, { title: titleFor, description: content });
   } else if (isDiscord) {
     payload = {
       content: content.length > DISCORD_CONTENT_MAX ? content.slice(0, DISCORD_CONTENT_MAX) : content,
