@@ -5,6 +5,8 @@ const path = require('path');
 const delivery = require('./delivery');
 
 const USAGE_URL = 'https://opencode.ai/zen/go/v1/usage';
+const { fetchWithRetry } = require('./fetch-retry'); // v0.20.0 (#112)
+const { atomicWriteJsonSync, readJsonKeepBak } = require('./atomic-write');
 
 // Per-request timeout (15s) so a hung quota endpoint can't stall the monitor
 // cycle indefinitely — mirrors the caps/catalog/liveness pattern. An abort
@@ -27,22 +29,21 @@ async function runUsage(authJsonPath, thresholds, stateDir) {
   // missing/corrupt file by starting empty.
   let history = [];
   if (historyFile) {
-    try {
-      const raw = fs.readFileSync(historyFile, 'utf8');
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        history = parsed;
-      } else if (parsed && typeof parsed === 'object') {
-        history = [
-          {
-            ts: Date.now(),
-            rolling: typeof parsed.rolling === 'number' ? parsed.rolling : null,
-            weekly: typeof parsed.weekly === 'number' ? parsed.weekly : null,
-            monthly: typeof parsed.monthly === 'number' ? parsed.monthly : null
-          }
-        ];
-      }
-    } catch (_) {
+    // v0.20.0 (#112): corrupt history preserved as .bak instead of reset.
+    const r = readJsonKeepBak(historyFile, null);
+    const parsed = r.ok ? r.data : null;
+    if (Array.isArray(parsed)) {
+      history = parsed;
+    } else if (parsed && typeof parsed === 'object') {
+      history = [
+        {
+          ts: Date.now(),
+          rolling: typeof parsed.rolling === 'number' ? parsed.rolling : null,
+          weekly: typeof parsed.weekly === 'number' ? parsed.weekly : null,
+          monthly: typeof parsed.monthly === 'number' ? parsed.monthly : null
+        }
+      ];
+    } else {
       history = [];
     }
   }
@@ -79,7 +80,8 @@ async function runUsage(authJsonPath, thresholds, stateDir) {
     }
     key = entry && entry.key ? entry.key : null;
   } catch (e) {
-    delivery.alert('warning', 'Could not read auth.json', String(e && e.message ? e.message : e));
+    // v0.20.0 (#112): auth errors carry the path + remediation (no key material).
+    delivery.alert('warning', 'Could not read auth.json', `${authJsonPath}: ${String(e && e.message ? e.message : e)} — sign in (opencode auth login) so usage/quota can be polled`);
     return { status: 'unknown', error: 'no key' };
   }
 
@@ -89,7 +91,7 @@ async function runUsage(authJsonPath, thresholds, stateDir) {
 
   let res;
   try {
-    res = await fetch(USAGE_URL, {
+    res = await fetchWithRetry(USAGE_URL, {
       headers: { Authorization: 'Bearer ' + key },
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
     });
@@ -195,13 +197,13 @@ async function runUsage(authJsonPath, thresholds, stateDir) {
       const cutoff = now - PRUNE_MS;
       history = history.filter((s) => s.ts >= cutoff);
       if (history.length > MAX_SAMPLES) history = history.slice(history.length - MAX_SAMPLES);
-      fs.writeFileSync(historyFile, JSON.stringify(history));
+      atomicWriteJsonSync(historyFile, history);
     } catch (_) {
       // best effort
     }
     // Persist the crossing-tracking status alongside the time-series.
     try {
-      if (quotaStatusFile) fs.writeFileSync(quotaStatusFile, JSON.stringify(quotaStatus));
+      if (quotaStatusFile) atomicWriteJsonSync(quotaStatusFile, quotaStatus);
     } catch (_) {
       // best effort
     }
@@ -218,8 +220,8 @@ async function runUsage(authJsonPath, thresholds, stateDir) {
 
 function loadQuotaStatus(file) {
   try {
-    const raw = fs.readFileSync(file, 'utf8');
-    const obj = JSON.parse(raw);
+    const r = readJsonKeepBak(file, {});
+    const obj = r.ok ? r.data : {};
     return obj && typeof obj === 'object' ? obj : {};
   } catch (_) {
     return {};
@@ -228,7 +230,7 @@ function loadQuotaStatus(file) {
 
 function saveQuotaStatus(file, status) {
   try {
-    if (file) fs.writeFileSync(file, JSON.stringify(status));
+    if (file) atomicWriteJsonSync(file, status);
   } catch (_) {
     // best effort
   }

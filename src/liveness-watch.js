@@ -34,6 +34,8 @@
 const fs = require('fs');
 const path = require('path');
 const delivery = require('./delivery');
+const { fetchWithRetry } = require('./fetch-retry'); // v0.20.0 (#112)
+const { atomicWriteFileSync, atomicWriteJsonSync, readJsonKeepBak } = require('./atomic-write');
 
 const LIVENESS_URL = 'https://opencode.ai/zen/go/v1/models';
 const ZEN_LIVENESS_URL = 'https://opencode.ai/zen/v1/models';
@@ -197,7 +199,7 @@ async function runLivenessWatchWith(stateDir, authJsonPath, pricedModels, usageS
 
   let res;
   try {
-    res = await fetch(url, {
+    res = await fetchWithRetry(url, {
       headers,
       signal: AbortSignal.timeout(TIMEOUT_MS)
     });
@@ -213,12 +215,8 @@ async function runLivenessWatchWith(stateDir, authJsonPath, pricedModels, usageS
   }
 
   if (res.status === 304) {
-    let snap = null;
-    try {
-      snap = JSON.parse(fs.readFileSync(snapFile, 'utf8'));
-    } catch (_) {
-      snap = null;
-    }
+    // v0.20.0 (#112): corrupt snapshot preserved as .bak instead of reset.
+    let snap = readJsonKeepBak(snapFile, null).data;
     const servingIds = (snap && Array.isArray(snap.ids)) ? snap.ids : [];
     if (shrinkageOnly) {
       // Serving set unchanged per ETag — no shrinkage possible.
@@ -263,17 +261,19 @@ async function runLivenessWatchWith(stateDir, authJsonPath, pricedModels, usageS
     // per-key endpoint serves a subset of the catalog, so priced-minus-serving
     // is divergence, not withdrawal.
     let priorIds = null;
+    // v0.20.0 (#112): corrupt snapshot preserved as .bak instead of reset.
     try {
-      const snap = JSON.parse(fs.readFileSync(snapFile, 'utf8'));
+      const snap = readJsonKeepBak(snapFile, null).data;
       if (snap && Array.isArray(snap.ids)) priorIds = snap.ids;
     } catch (_) {
       priorIds = null;
     }
 
     try {
-      fs.writeFileSync(snapFile, JSON.stringify({ ts: new Date().toISOString(), ids: servingIds }, null, 2));
+      // v0.20.0 (#112): atomic snapshot + ETag writes.
+      atomicWriteJsonSync(snapFile, { ts: new Date().toISOString(), ids: servingIds });
       const newEtag = res.headers && res.headers.get ? res.headers.get('etag') : null;
-      if (newEtag) fs.writeFileSync(etagFile, newEtag);
+      if (newEtag) atomicWriteFileSync(etagFile, newEtag);
     } catch (e) {
       try {
         delivery.alert('warning', 'Liveness snapshot save failed', String((e && e.message) || e));
@@ -326,9 +326,10 @@ async function runLivenessWatchWith(stateDir, authJsonPath, pricedModels, usageS
   }
 
   try {
-    fs.writeFileSync(snapFile, JSON.stringify({ ts: new Date().toISOString(), ids: servingIds }, null, 2));
+    // v0.20.0 (#112): atomic snapshot + ETag writes.
+    atomicWriteJsonSync(snapFile, { ts: new Date().toISOString(), ids: servingIds });
     const newEtag = res.headers && res.headers.get ? res.headers.get('etag') : null;
-    if (newEtag) fs.writeFileSync(etagFile, newEtag);
+    if (newEtag) atomicWriteFileSync(etagFile, newEtag);
   } catch (e) {
     try {
       delivery.alert('warning', 'Liveness snapshot save failed', String((e && e.message) || e));

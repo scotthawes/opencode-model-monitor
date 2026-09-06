@@ -6,6 +6,7 @@ const { execFile } = require('child_process');
 const usageTable = require('./usage-table');
 const events = require('./events'); // v0.8.0: event-sourced history (JSONL, #73)
 const changeMetric = require('./change-metric'); // shared Δ% / × / $ formatting
+const { atomicWriteJsonSync, redactUrl } = require('./atomic-write'); // v0.20.0 (#112)
 
 // Delivery channels. Configured once at startup with the user's delivery
 // options + the state directory. All functions are best-effort and never throw.
@@ -84,7 +85,18 @@ function writeChangelogEntries(entries) {
     const cutoff = Date.now() - changelogRetentionMs;
     arr = arr.filter((e) => (e.ts ? Date.parse(e.ts) : 0) >= cutoff);
     if (arr.length > CHANGELOG_MAX_ENTRIES) arr = arr.slice(arr.length - CHANGELOG_MAX_ENTRIES);
-    fs.writeFileSync(path.join(STATE_DIR, 'changelog.json'), JSON.stringify(arr, null, 2));
+    // v0.20.0 (#112): atomic changelog write; ENOSPC → critical alert + read-only degrade.
+    const onEnospc = () => {
+      try {
+        fs.appendFileSync(
+          path.join(STATE_DIR, 'alerts.log'),
+          `[${ts()}] CRITICAL | State disk full (ENOSPC) | changelog writes disabled — running read-only until space is freed\n`
+        );
+      } catch (_) {}
+    };
+    if (!atomicWriteJsonSync(path.join(STATE_DIR, 'changelog.json'), arr, onEnospc)) {
+      if (!require('./atomic-write').isReadOnly()) debug('changelog write failed (non-ENOSPC)');
+    }
     invalidateCycleCache();
   } catch (_) {
     // best effort
@@ -230,7 +242,8 @@ function loadDedup() {
 
 function saveDedup() {
   try {
-    fs.writeFileSync(dedupPath(), JSON.stringify(Object.fromEntries(dedupStore), null, 2));
+    // v0.20.0 (#112): atomic dedup write.
+    atomicWriteJsonSync(dedupPath(), Object.fromEntries(dedupStore));
   } catch (_) {
     // best effort
   }
@@ -291,7 +304,8 @@ function backfillFromAlertsLog(base) {
   if (arr.length > 500) arr = arr.slice(arr.length - 500);
   try {
     if (arr.length) {
-      fs.writeFileSync(clPath, JSON.stringify(arr, null, 2));
+      // v0.20.0 (#112): atomic backfill write.
+      atomicWriteJsonSync(clPath, arr);
       const logBlob =
         arr.map((e) => `[${e.ts}] ${e.level.toUpperCase()} | ${e.title} | ${e.message}`).join('\n') + '\n';
       fs.appendFileSync(path.join(base, 'changelog.log'), logBlob);
@@ -528,6 +542,8 @@ function subscribersPath() {
 
 // Best-effort load of subscribers.json. Never throws; on any failure the
 // subscriber list is left empty so the monitor continues normally.
+// v0.20.0 (#112): warns when the secret file is group/world-readable so a
+// permissive umask can't silently expose webhook secrets.
 function loadSubscribers() {
   const p = subscribersPath();
   try {
@@ -535,6 +551,17 @@ function loadSubscribers() {
       SUBSCRIBERS = [];
       return;
     }
+    try {
+      const st = fs.statSync(p);
+      if (st.mode & 0o077) {
+        try {
+          fs.appendFileSync(
+            path.join(STATE_DIR, 'alerts.log'),
+            `[${ts()}] WARNING | Subscriber file permissions are loose (mode ${(st.mode & 0o777).toString(8)}, expected 600) | run: chmod 600 subscribers.json\n`
+          );
+        } catch (_) {}
+      }
+    } catch (_) {}
     const raw = fs.readFileSync(p, 'utf8');
     const arr = JSON.parse(raw);
     SUBSCRIBERS = Array.isArray(arr) ? arr : [];
@@ -550,17 +577,25 @@ function loadSubscribers() {
 }
 
 // Deliver a single payload to one subscriber endpoint. Best-effort: any failure
-// is logged to alerts.log as a WARNING; this function never rejects.
+// is logged to alerts.log as a WARNING with HTTP status + body excerpt (v0.20.0,
+// #112); this function never rejects.
 async function deliverToSubscriber(sub, url, payload) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SUBSCRIBER_TIMEOUT_MS);
   try {
-    await fetch(url, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
       signal: controller.signal
     });
+    if (res && !res.ok) {
+      let bodyExcerpt = '';
+      try {
+        bodyExcerpt = String(await res.text()).slice(0, 200);
+      } catch (_) {}
+      throw new Error(`HTTP ${res.status}${bodyExcerpt ? ` — ${bodyExcerpt}` : ''}`);
+    }
   } catch (e) {
     try {
       const name = (sub && sub.name) || 'unknown';
@@ -584,12 +619,19 @@ async function postToWebhook(url, payload) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SUBSCRIBER_TIMEOUT_MS);
   try {
-    await fetch(url, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
       signal: controller.signal
     });
+    if (res && !res.ok) {
+      let bodyExcerpt = '';
+      try {
+        bodyExcerpt = String(await res.text()).slice(0, 200);
+      } catch (_) {}
+      throw new Error(`HTTP ${res.status}${bodyExcerpt ? ` — ${bodyExcerpt}` : ''}`);
+    }
   } catch (e) {
     try {
       fs.appendFileSync(
@@ -1127,7 +1169,9 @@ function reportSummary(report) {
   } catch (_) {}
   const quiet = events.length === 0;
   const statusEmoji = quiet ? '🟢' : '🔴';
-  const statusText = quiet ? 'All quiet' : `${events.length} change(s)`;
+  // v0.20.0 (#112): vocabulary normalized to ok/warn/crit (matches quota
+  // classification) so the summary never contradicts the Usage section.
+  const statusText = quiet ? 'ok — All quiet' : `warn — ${events.length} change(s)`;
 
   // Biggest risk: the most severe window at/above a threshold, else a fast
   // upward 7-day trend that would hit warn within a week, else "nominal".
@@ -1530,10 +1574,11 @@ function writeReport(report) {
   ensureConfig();
   if (!CONFIG.reportFile) return;
   try {
+    // v0.20.0 (#112): atomic report writes (tmp+rename).
     const jsonPath = path.join(STATE_DIR, 'report.json');
-    fs.writeFileSync(jsonPath, JSON.stringify(report, null, 2));
+    atomicWriteJsonSync(jsonPath, report);
     const mdPath = path.join(STATE_DIR, 'report.md');
-    fs.writeFileSync(mdPath, renderMarkdown(report));
+    require('./atomic-write').atomicWriteFileSync(mdPath, renderMarkdown(report));
   } catch (_) {
     // best effort
   }
@@ -2147,6 +2192,7 @@ module.exports = {
   flush,
   writeReport,
   renderMarkdown,
+  reportSummary,
   init,
   setKnownModelIds,
   loadSubscribers,

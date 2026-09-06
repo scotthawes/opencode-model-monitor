@@ -16,6 +16,36 @@ const discordDigest = require('./discord-digest');
 // Post the periodic Discord digest on this cadence while running continuously.
 const DIGEST_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
+const MONITOR_VERSION = require('../package.json').version || 'unknown';
+
+function printHelpAndExit() {
+  console.log(`opencode-model-monitor v${MONITOR_VERSION}
+Passive monitor for OpenCode hosted models (pricing, quota, pins).
+
+USAGE
+  node src/monitor.js [--once|-1] [--force] [--digest-once] [--demo-model-table] [--help|-h]
+
+FLAGS
+  --once, -1          single check, then exit (prints one-line summary)
+  --force             override the state lock held by another live instance
+  --digest-once       post the 7-day Discord digest once, then exit
+  --demo-model-table  post a labeled DEMO model-change table, then exit
+  --help, -h          show this help and exit 0
+
+STATE / OUTPUT
+  All output lands in state/ (gitignored): alerts.log, report.json, report.md.
+  Network access required for live feeds; usage/quota needs auth.json key.
+  Run 'npm run report' to print the latest report.
+`);
+  process.exit(0);
+}
+
+if (process.argv.includes('--help') || process.argv.includes('-h')) printHelpAndExit();
+
+function printBanner() {
+  console.log(`opencode-model-monitor v${MONITOR_VERSION} — watching pricing, quota, pins (state/ gitignored)`);
+}
+
 // --- Singleton lockfile ----------------------------------------------------
 //
 // We must never run two monitors against the same state dir at once: they would
@@ -132,10 +162,38 @@ function buildDemoModelTable(stateDir) {
 }
 
 async function main() {
+  printBanner();
   const config = loadConfig();
   const stateDir = path.join(__dirname, '..', 'state');
   fs.mkdirSync(stateDir, { recursive: true });
   delivery.configure(config.delivery, stateDir);
+
+  // Crash-safety (v0.20.0, #112): an unhandled rejection/exception must never
+  // silently kill the daemon. Log to debug, raise an alert, flush delivery,
+  // then exit non-zero so launchd/systemd restarts us (throttled, see deploy/).
+  let fatalShuttingDown = false;
+  async function fatalShutdown(err, kind) {
+    if (fatalShuttingDown) return;
+    fatalShuttingDown = true;
+    try {
+      const msg = String((err && err.stack) || (err && err.message) || err);
+      delivery.debug(`Fatal ${kind}: ${msg.slice(0, 1000)}`);
+    } catch (_) {}
+    try {
+      await delivery.alert(
+        'critical',
+        `Monitor ${kind}`,
+        String((err && err.message) || err).slice(0, 500)
+      );
+    } catch (_) {}
+    try {
+      await delivery.flush();
+    } catch (_) {}
+    try { removeLock(); } catch (_) {}
+    process.exit(1);
+  }
+  process.on('unhandledRejection', (reason) => fatalShutdown(reason, 'unhandledRejection'));
+  process.on('uncaughtException', (err) => fatalShutdown(err, 'uncaughtException'));
   // Rotate alerts.log at process start (in addition to each cycle) so a long-lived
   // continuous process never grows it past the cap between cycles.
   maybeRotateAlertsLog(stateDir);
@@ -147,6 +205,11 @@ async function main() {
 
   // Latest models map, refreshed by price-watch, used by config-scan.
   let latestModels = {};
+
+  // Acquire the singleton lock FIRST (v0.20.0, #112): --once, continuous,
+  // AND --demo-model-table all respect it so CLI writers never race the
+  // daemon. Only --force overrides. Exits (code 2) on a live-PID conflict.
+  acquireLock(force);
 
   // One-shot demo: post the new aggregated model-change table to Discord using
   // the last real hy3 change (current cost -> 8x older) as the example, labeled
@@ -348,12 +411,21 @@ async function main() {
     process.exit(code);
   }
 
-  // Acquire the singleton lock. Exits (code 2) if another live instance holds
-  // it, unless --force. --once and continuous BOTH respect the lock; only
-  // --force overrides. Skipped for --demo-model-table (quick post, no cycle).
-  if (!demoTable) acquireLock(force);
+  const report = await cycle();
 
-  await cycle();
+  // --once one-line summary (v0.20.0, #112): always printed to stdout even
+  // when delivery.stdout is false, so a one-shot run never looks hung.
+  // Vocabulary normalized to ok/warn/crit (matches quota classification).
+  if (once || digestOnce || demoTable) {
+    try {
+      const summary = delivery.reportSummary(report);
+      const first = (summary && summary[0]) || 'done';
+      const level = /All quiet/i.test(first) ? 'ok' : 'warn';
+      console.log(`[monitor:${level}] ${first} — report: state/report.md`);
+    } catch (_) {
+      console.log('[monitor:ok] cycle complete — report: state/report.md');
+    }
+  }
 
   // Manual one-shot digest: post the current 7-day summary and exit. This is
   // the command used to push a live baseline into Discord on demand. It does
@@ -378,55 +450,75 @@ async function main() {
   process.on('SIGTERM', () => shutdown(0));
 
   // Continuous mode: schedule each feed with its own interval.
+  // v0.20.0 (#112): re-entrancy guard (a slow cycle never overlaps the next)
+  // + decoupled chain — catalog/liveness run INDEPENDENTLY of price-watch
+  // success instead of nesting inside its .then(), so one failing feed can
+  // never starve the others.
   const c = config.cadenceMs;
+  let pricingInFlight = false;
 
-  setInterval(() => {
-    // Live caps ride alongside api.json (same 30min c.pricing cadence) and run
-    // BEFORE price-watch so the existing cap detector fires once per move.
-    runCapsWatch(stateDir)
-      .catch((e) =>
-        delivery.alert('warning', 'caps-watch failed', String(e && e.message ? e.message : e), {
-          dedupKey: 'monitor:caps-watch',
+  function pricingTick() {
+    if (pricingInFlight) {
+      delivery.debug('pricing tick skipped: previous tick still in flight');
+      return;
+    }
+    pricingInFlight = true;
+    (async () => {
+      // Live caps ride alongside api.json (same 30min c.pricing cadence) and run
+      // BEFORE price-watch so the existing cap detector fires once per move.
+      try {
+        await runCapsWatch(stateDir).catch((e) =>
+          delivery.alert('warning', 'caps-watch failed', String(e && e.message ? e.message : e), {
+            dedupKey: 'monitor:caps-watch',
+            dedupTtlMs: 3600000
+          })
+        );
+      } catch (_) {}
+      let p = null;
+      try {
+        p = await runPriceWatch(stateDir);
+      } catch (e) {
+        await delivery.alert('warning', 'price-watch failed', String(e && e.message ? e.message : e), {
+          dedupKey: 'monitor:price-watch',
           dedupTtlMs: 3600000
-        })
-      )
-      .then(() => runPriceWatch(stateDir))
-      .then((p) => {
-        if (p && p.models) latestModels = p.models;
-        // Catalog cross-check rides alongside api.json (same 30min cadence).
+        });
+      }
+      if (p && p.models) latestModels = p.models;
+      // Catalog + liveness ride the same cadence but run independently: each
+      // has its own catch and never depends on price-watch succeeding.
+      await Promise.allSettled([
         runCatalogWatch(stateDir, { apiShapeFailed: !!(p && p.shapeFailed) }).catch((e) =>
           delivery.alert('warning', 'catalog-watch failed', String(e && e.message ? e.message : e), {
             dedupKey: 'monitor:catalog-watch',
             dedupTtlMs: 3600000
           })
-        );
-        // Liveness (Go + Zen) rides alongside api.json too (IDs only, no pricing).
+        ),
         runLivenessWatch(stateDir, config.authJsonPath, (p && p.models) || {}).catch((e) =>
           delivery.alert('warning', 'liveness-watch failed', String(e && e.message ? e.message : e), {
             dedupKey: 'monitor:liveness-watch',
             dedupTtlMs: 3600000
           })
-        );
-        // Zen mirror (v0.15.0, #96; scoped v0.15.1, #98): own ETag/snapshot,
-        // same 30min cadence. Zen-priced + free scope only — never Go-priced.
-        const zp = buildZenPricedSet(
-          (p && (p.zenModels || (p.models && p.models.zenModels))) || {},
-          (p && (p.freeModels || (p.models && p.models.freeModels))) || []
-        );
-        runZenLivenessWatch(stateDir, config.authJsonPath, zp).catch((e) =>
+        ),
+        runZenLivenessWatch(
+          stateDir,
+          config.authJsonPath,
+          buildZenPricedSet(
+            (p && (p.zenModels || (p.models && p.models.zenModels))) || {},
+            (p && (p.freeModels || (p.models && p.models.freeModels))) || []
+          )
+        ).catch((e) =>
           delivery.alert('warning', 'liveness-zen-watch failed', String(e && e.message ? e.message : e), {
             dedupKey: 'monitor:liveness-zen-watch',
             dedupTtlMs: 3600000
           })
-        );
-      })
-    .catch((e) =>
-      delivery.alert('warning', 'price-watch failed', String(e && e.message ? e.message : e), {
-        dedupKey: 'monitor:price-watch',
-        dedupTtlMs: 3600000
-      })
-    );
-  }, c.pricing);
+        )
+      ]);
+    })().finally(() => {
+      pricingInFlight = false;
+    });
+  }
+
+  setInterval(pricingTick, c.pricing);
 
   setInterval(() => {
     runUsage(config.authJsonPath, config.thresholds, stateDir).catch((e) =>
@@ -510,9 +602,18 @@ async function main() {
   );
 }
 
-main().catch((e) => {
+main().catch(async (e) => {
+  // v0.20.0 (#112): message-only fatal line (no stack dump) + flush delivery
+  // before exit so the failure alert is not dropped; release the lock.
   try {
-    console.error('Fatal:', e);
+    console.error('Fatal:', e && e.message ? e.message : e);
   } catch (_) {}
+  try {
+    await delivery.alert('critical', 'Monitor fatal', String((e && e.message) || e).slice(0, 500));
+  } catch (_) {}
+  try {
+    await delivery.flush();
+  } catch (_) {}
+  try { removeLock(); } catch (_) {}
   process.exit(1);
 });

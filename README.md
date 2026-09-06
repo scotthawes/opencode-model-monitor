@@ -46,8 +46,18 @@ Clone and run; alerts start immediately for any OpenCode Go-plan user. No
 git clone https://github.com/scotthawes/opencode-model-monitor
 cd opencode-model-monitor
 node src/monitor.js --once   # single check, then exit
+npm run report               # print the latest report from state/report.md
 node src/monitor.js          # continuous; writes alerts to state/alerts.log + state/report.md
 ```
+
+> `npm run monitor:once` / `npm run monitor` work too, but they require `npm`
+> on PATH. The `node` commands above only need Node itself.
+>
+> **What to expect:** the monitor needs network access for live feeds
+> (api.json, Atom feeds) and an `auth.json` key for usage/quota polling —
+> without the key, quota sections report `unknown` (pricing still works).
+> First run establishes a baseline silently (info-level "Baseline established",
+> no change flood); later runs diff against it.
 
 > `npm run monitor:once` / `npm run monitor` work too, but they require `npm`
 > on PATH. The `node` commands above only need Node itself.
@@ -395,7 +405,7 @@ forum example in `subscribers.example.json`.
 **Add a subscriber (Slack or Discord):**
 1. Copy `subscribers.example.json` → `subscribers.json`.
 2. Add `{ "name": "...", "webhookUrl": "<Slack/Discord incoming-webhook URL>", "levels": ["model_change","warning","critical"] }` (or use `webhookEnv` to read the URL from an env var). For a Discord forum channel, include `?thread_name=`/`?thread_id=` on the URL (or use the `threadName`/`threadId` fields).
-3. Test instantly with a one-shot run: `MODEL_MONITOR_WEBHOOK= URL node src/monitor.js --once` — or just watch `state/alerts.log` for your subscriber name on the next alert.
+3. Test instantly with a one-shot run: `MODEL_MONITOR_WEBHOOK="https://hooks.slack.com/services/XXX/YYY/ZZZ" node src/monitor.js --once` — or just watch `state/alerts.log` for your subscriber name on the next alert.
 
 A ready-to-edit template lives at [`config.example.json`](config.example.json).
 

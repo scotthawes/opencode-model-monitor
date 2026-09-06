@@ -80,6 +80,18 @@ function confirm(question) {
   return ask(`${question} (y/n)`).then((ans) => /^y(es)?$/i.test(ans));
 }
 
+// v0.20.0 (#112): re-prompt on ambiguous confirm answers instead of treating
+// anything non-"y" as "no" (up to 3 tries, then default to false).
+async function confirmWithReprompt(question) {
+  for (let i = 0; i < 3; i++) {
+    const ans = await ask(`${question} (y/n)`);
+    if (/^y(es)?$/i.test(ans)) return true;
+    if (/^n(o)?$/i.test(ans)) return false;
+    console.log("Please answer 'y' or 'n'.");
+  }
+  return false;
+}
+
 // --- validation / shaping --------------------------------------------------
 
 // Detect the platform purely from the URL — mirrors delivery.js detection.
@@ -198,8 +210,14 @@ async function main() {
 
     if (raw.toLowerCase() === 'env') {
       webhookEnv = await ask('Environment variable name (e.g. MODEL_MONITOR_DISCORD_WEBHOOK)');
+      // v0.20.0 (#112): validate the env name AND that it resolves to an
+      // https URL before accepting it (previously any name passed silently).
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(webhookEnv || '')) {
-        console.log('Invalid env var name. Try again.\n');
+        console.log('Invalid env var name (must match [A-Za-z_][A-Za-z0-9_]*). Try again.\n');
+        continue;
+      }
+      if (/^(PATH|HOME|SHELL|USER|PWD|OLDPWD|LANG|LC_|NODE_|NPM_|AWS_|GITHUB_|OPENAI_|ANTHROPIC_)/i.test(webhookEnv)) {
+        console.log(`Refusing '${webhookEnv}': reserved/system prefix — pick a dedicated name like MODEL_MONITOR_DISCORD_WEBHOOK.\n`);
         continue;
       }
       url = process.env[webhookEnv] || null;
@@ -207,6 +225,12 @@ async function main() {
         console.log(
           `WARN: $${webhookEnv} is not set in this shell. The subscriber will be saved but the test POST is skipped until the var is exported.`
         );
+      } else {
+        const ev = validateUrl(url);
+        if (!ev.ok) {
+          console.log(`WARN: $${webhookEnv} is set but invalid (${ev.reason}). Fix the value before relying on it.\n`);
+          continue;
+        }
       }
     } else {
       const v = validateUrl(raw);
@@ -217,20 +241,36 @@ async function main() {
       url = raw;
     }
 
-    // 4) levels
-    const levelsInput = await ask(
-      `Alert levels (comma-separated: ${ALLOWED_LEVELS.join(', ')})`,
-      DEFAULT_LEVELS.join(',')
-    );
-    const parsed = parseLevels(levelsInput);
-    if (!parsed.ok) {
-      console.log(`Invalid level(s): ${parsed.bad.join(', ')}. Allowed: ${ALLOWED_LEVELS.join(', ')}. Try again.\n`);
+    // 4) levels — inner re-prompt loop (v0.20.0, #112): an invalid level
+    // entry re-asks ONLY the levels, keeping the already-validated URL/env.
+    let levels = null;
+    for (let levelRetries = 0; levelRetries < 5; levelRetries++) {
+      const levelsInput = await ask(
+        `Alert levels (comma-separated: ${ALLOWED_LEVELS.join(', ')})`,
+        DEFAULT_LEVELS.join(',')
+      );
+      if (!String(levelsInput || '').trim()) {
+        levels = DEFAULT_LEVELS.slice();
+        break;
+      }
+      const parsed = parseLevels(levelsInput);
+      if (parsed.ok && parsed.levels.length) {
+        levels = parsed.levels;
+        break;
+      }
+      console.log(
+        `Invalid level(s): ${(parsed.bad && parsed.bad.length ? parsed.bad : ['(empty)']).join(', ')}. ` +
+        `Allowed: ${ALLOWED_LEVELS.join(', ')}. Try again (or empty for default).\n`
+      );
+    }
+    if (!levels) {
+      console.log('Too many invalid level entries. Try again.\n');
       continue;
     }
 
     sub = webhookEnv
-      ? { name, webhookEnv, levels: parsed.levels }
-      : { name, webhookUrl: url, levels: parsed.levels };
+      ? { name, webhookEnv, levels }
+      : { name, webhookUrl: url, levels };
 
     // 5) live test POST (only if we can resolve a URL right now)
     if (url) {
@@ -244,7 +284,7 @@ async function main() {
       } catch (e) {
         console.log(`Test POST errored: ${e && e.message ? e.message : e}`);
       }
-      const seen = await confirm('Did you see the test message in your channel?');
+      const seen = await confirmWithReprompt('Did you see the test message in your channel?');
       if (seen) {
         console.log('Great — channel confirmed.');
         break;
@@ -311,15 +351,17 @@ EXAMPLES
 `);
 }
 
-const _firstArg = process.argv.slice(2)[0];
-if (_firstArg === '--help' || _firstArg === '-h') {
+// v0.20.0 (#112): --help anywhere in argv (not just argv[0]), so
+// `npm run add-webhook -- --help` and bare flags all work.
+if (process.argv.slice(2).includes('--help') || process.argv.slice(2).includes('-h')) {
   printUsage();
   rl.close();
   process.exit(0);
 }
 
 main().catch((e) => {
-  console.error('Onboarding failed:', e && e.stack ? e.stack : e);
+  // v0.20.0 (#112): message-only errors — no stack dump on the onboarding path.
+  console.error('Onboarding failed:', e && e.message ? e.message : e);
   rl.close();
   process.exit(1);
 });

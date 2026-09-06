@@ -204,7 +204,7 @@ function leaderboard(models, pattern, limit) {
 // Returns {} on any failure (caller decides how to surface). Never throws.
 async function fetchModelsMap() {
   try {
-    const res = await fetch(API_URL, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    const res = await require('./fetch-retry').fetchWithRetry(API_URL, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     if (!res.ok) return {};
     const data = await res.json();
     const modelsRaw = (data && data['opencode-go'] && data['opencode-go'].models) || {};

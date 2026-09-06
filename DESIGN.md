@@ -48,7 +48,7 @@ phase *could* attach; they are currently inert.
 - **`price-watch.js`** — fetches `https://models.opencode.ai/api.json`, extracts
   the `opencode-go.models.*.cost` subtree (input/output/cache_read/cache_write +
   context-window `tiers`), writes a dated snapshot to
-  `~/.config/opencode/price-history/`, diffs vs the previous snapshot, and alerts
+  `state/pricing-snapshot.json` (+ `state/history.json` time-series), diffs vs the previous snapshot, and alerts
    via log / notifier / webhook on any price change / new / removed model.
 - **`budget.json`** (new, user-specific) — declares the plan and caps per window
   (e.g. `$12/5h`, `$30/week`, `$60/month` for the Go plan — confirm actual

@@ -11,6 +11,9 @@ const delivery = require('./delivery');
 // Returns { key, newEntries } where newEntries is an array of
 // { title, updated, id, link }. On a 304 (not modified) newEntries is [].
 
+const { fetchWithRetry } = require('./fetch-retry'); // v0.20.0 (#112)
+const { atomicWriteJsonSync, atomicWriteFileSync, readJsonKeepBak, redactUrl } = require('./atomic-write');
+
 const MAX_SEEN = 25;
 
 // Per-request timeout (15s) so a hung feed can't stall the monitor cycle
@@ -28,8 +31,10 @@ async function runAtomWatch(stateDir, key, feedUrl) {
   } catch (_) {}
 
   let prior = { etag: null, seenIds: [] };
+  // v0.20.0 (#112): corrupt store preserved as .bak instead of reset.
   try {
-    prior = JSON.parse(fs.readFileSync(storePath, 'utf8')) || {};
+    const r = readJsonKeepBak(storePath, null);
+    if (r.ok && r.data) prior = r.data;
   } catch (_) {}
   const seenIds = Array.isArray(prior.seenIds) ? prior.seenIds : [];
 
@@ -44,7 +49,7 @@ async function runAtomWatch(stateDir, key, feedUrl) {
 
   let res;
   try {
-    res = await fetch(feedUrl, {
+    res = await fetchWithRetry(feedUrl, {
       headers: reqEtag ? { 'If-None-Match': reqEtag } : {},
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
     });
@@ -61,7 +66,7 @@ async function runAtomWatch(stateDir, key, feedUrl) {
   }
 
   if (!res.ok) {
-    delivery.alert('warning', `Feed fetch HTTP ${res.status}: ${key}`, feedUrl, {
+    delivery.alert('warning', `Feed fetch HTTP ${res.status}: ${key}`, redactUrl(feedUrl), {
       dedupKey: 'monitor:atom-feed:' + key,
       dedupTtlMs: 3600000
     });
@@ -100,11 +105,12 @@ async function runAtomWatch(stateDir, key, feedUrl) {
   const trimmed = merged.slice(-MAX_SEEN);
 
   try {
-    fs.writeFileSync(
+    // v0.20.0 (#112): atomic store write (tmp+rename).
+    atomicWriteJsonSync(
       storePath,
-      JSON.stringify({ etag: newEtag || reqEtag, seenIds: trimmed }, null, 2)
+      { etag: newEtag || reqEtag, seenIds: trimmed }
     );
-    if (newEtag) fs.writeFileSync(etagPath, newEtag);
+    if (newEtag) atomicWriteFileSync(etagPath, newEtag);
   } catch (e) {
     delivery.alert('warning', 'Feed store save failed: ' + key, String(e && e.message ? e.message : e));
   }
