@@ -1,6 +1,7 @@
 'use strict';
 
-// v1/models liveness cross-check (v0.12.0, #90; Zen mirror v0.15.0, #96).
+// v1/models liveness cross-check (v0.12.0, #90; Zen mirror v0.15.0, #96;
+// Zen scoping v0.15.1, #98).
 //
 // GETs https://opencode.ai/zen/go/v1/models (Go) and
 // https://opencode.ai/zen/v1/models (Zen, opencode provider base) with the same
@@ -9,6 +10,11 @@
 //
 //   1. Withdrawn-but-priced: models present in the pricing snapshot but absent
 //      from liveness get a deduped warning "priced but not serving: <id>".
+//      Scoping (#98): the Go check diffs opencode-go-priced ids against Go
+//      serving; the Zen check diffs ZEN-priced + free ids (see
+//      buildZenPricedSet) against Zen serving. Go-vs-Zen catalog divergence is
+//      expected (Go-only models such as hy3 are not Zen-served) and must never
+//      alert as a Zen withdrawal.
 //   2. Outage-vs-quota: when liveness (Go and/or Zen) and usage both fail the
 //      provider is likely down ("provider outage suspected"); a usage-only
 //      failure is a quota/auth issue, not an outage. See classifyOutage().
@@ -51,6 +57,42 @@ function extractServingIds(data) {
     // fall through to []
   }
   return [];
+}
+
+// Pure: build the Zen-priced id set (#98). `zenModels` is the api.json
+// opencode-provider BILLABLE set (price-watch `zenModels`: id array or id→entry
+// map); `freeModels` is the snapshot free-model list (id array or id→entry
+// map). Returns the deduped union: Zen-billable + free ids. Go
+// (opencode-go-priced) ids must NEVER be passed in here — Go-vs-Zen catalog
+// divergence is expected, not a withdrawal. Reserved snapshot keys
+// (freeModels/modelPrivacy/zenModels) are dropped when a whole snapshot map is
+// passed as `zenModels`. Never throws.
+function buildZenPricedSet(zenModels, freeModels) {
+  try {
+    const out = [];
+    const seen = new Set();
+    const pushIds = (src) => {
+      let ids;
+      if (Array.isArray(src)) {
+        ids = src;
+      } else if (src && typeof src === 'object') {
+        ids = Object.keys(src).filter((k) => k !== 'freeModels' && k !== 'modelPrivacy' && k !== 'zenModels');
+      } else {
+        return;
+      }
+      for (const id of ids) {
+        if (typeof id === 'string' && id.length && !seen.has(id)) {
+          seen.add(id);
+          out.push(id);
+        }
+      }
+    };
+    pushIds(zenModels);
+    pushIds(freeModels);
+    return out;
+  } catch (_) {
+    return [];
+  }
 }
 
 // Pure: priced-but-absent diff. `pricedIds` and `servingIds` are arrays (or a
@@ -112,7 +154,7 @@ async function runLivenessWatchWith(stateDir, authJsonPath, pricedModels, usageS
   const dedupPrefix = (opts && opts.dedupPrefix) || 'liveness:missing:';
   const etagFile = path.join(stateDir, etagName);
   const snapFile = path.join(stateDir, snapName);
-  const pricedIds = Array.isArray(pricedModels) ? pricedModels : Object.keys(pricedModels || {}).filter((k) => k !== 'freeModels' && k !== 'modelPrivacy');
+  const pricedIds = Array.isArray(pricedModels) ? pricedModels : Object.keys(pricedModels || {}).filter((k) => k !== 'freeModels' && k !== 'modelPrivacy' && k !== 'zenModels');
 
   const key = authJsonPath ? readGoKey(authJsonPath) : null;
   if (!key) {
@@ -225,20 +267,25 @@ async function runLivenessWatch(stateDir, authJsonPath, pricedModels, usageStatu
   return runLivenessWatchWith(stateDir, authJsonPath, pricedModels, usageStatus, usageError, overrides);
 }
 
-// Zen mirror (v0.15.0, #96): same Bearer key, same withdrawn/dedup logic, own
-// ETag + snapshot files so the two endpoints never clobber each other.
+// Zen mirror (v0.15.0, #96; scoped v0.15.1, #98): same Bearer key, same
+// withdrawn/dedup logic, own ETag + snapshot files so the two endpoints never
+// clobber each other. Callers MUST pass the Zen-priced + free set (see
+// buildZenPricedSet) — never the opencode-go map. Dedup prefix bumped to
+// liveness-zen2: so the corrected logic refires cleanly once for genuinely
+// withdrawn models instead of staying suppressed by the old (Go-scoped) keys.
 async function runZenLivenessWatch(stateDir, authJsonPath, pricedModels, usageStatus, usageError) {
   return runLivenessWatchWith(stateDir, authJsonPath, pricedModels, usageStatus, usageError, {
     url: ZEN_LIVENESS_URL,
     etagFile: ZEN_ETAG_FILE,
     snapFile: ZEN_SNAP_FILE,
-    dedupPrefix: 'liveness-zen:missing:'
+    dedupPrefix: 'liveness-zen2:missing:'
   });
 }
 
 module.exports = {
   runLivenessWatch,
   runZenLivenessWatch,
+  buildZenPricedSet,
   extractServingIds,
   computeWithdrawn,
   classifyOutage,

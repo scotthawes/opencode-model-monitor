@@ -356,7 +356,9 @@ function detectCapChanges(stateDir, modelsMap) {
 
 // Fetches the authoritative pricing catalog for the opencode-go provider,
 // diffs it against the previous snapshot, and alerts on any model change.
-// Returns { status, models, changes, modelCount, error, freeModels }.
+// Returns { status, models, changes, modelCount, error, freeModels, zenModels }.
+// `zenModels` is the Zen (opencode provider) BILLABLE id list — the Zen-priced
+// set for Zen liveness scoping (#98). Free Zen models ride in `freeModels`.
 async function runPriceWatch(stateDir) {
   const etagFile = path.join(stateDir, '.etag-pricing');
   const snapFile = path.join(stateDir, 'pricing-snapshot.json');
@@ -382,26 +384,60 @@ async function runPriceWatch(stateDir) {
   }
 
    if (res.status === 304) {
+     // One-time backfill (#98): snapshots written before v0.15.1 have no
+     // `zenModels` map, and a 304 carries no body to build it from — so refetch
+     // once WITHOUT If-None-Match and fall through to the normal 200 path
+     // below, which persists it. Best-effort: any failure keeps `res` as the
+     // 304 and the existing unchanged-handling below applies (Zen scope is
+     // free-only until the next full fetch populates the billable set).
+     const snapPeek = readSnapshot(snapFile);
+     const hasZenMap =
+       snapPeek &&
+       typeof snapPeek.zenModels === 'object' &&
+       snapPeek.zenModels !== null &&
+       !Array.isArray(snapPeek.zenModels);
+     if (!hasZenMap) {
+       try {
+         const full = await fetch(API_URL, {});
+         if (full && full.ok) res = full;
+       } catch (_) {
+         // fall back to the 304 handling below
+       }
+     }
+   }
+
+   if (res.status === 304) {
      // Catalog unchanged: surface the previously persisted free-model list (it is
      // already in the snapshot) so the report/Discord views stay accurate every
      // cycle without re-scanning the unchanged catalog.
      const snap = readSnapshot(snapFile);
      // Even on a 304, a re-seeded usage-table.json may have changed a model's cap,
      // so still diff caps (best-effort, silent on the common no-change case).
-     const snapModels = {};
-     for (const id of Object.keys(snap || {})) {
-       if (id === 'freeModels') continue;
-       const e = snap[id] || {};
-       snapModels[id] = { cost: e.cost || null, tiers: e.tiers || null, meta: e.meta || null, usage: null };
-     }
-     const capChanges = detectCapChanges(stateDir, snapModels);
-     return {
-       status: 'unchanged',
-       models: snap,
-       changes: capChanges.map(capChangeText),
-       capChanges,
-       freeModels: Array.isArray(snap.freeModels) ? Object.keys(snap.freeModels) : []
-     };
+      const snapModels = {};
+      for (const id of Object.keys(snap || {})) {
+        if (id === 'freeModels' || id === 'modelPrivacy' || id === 'zenModels') continue;
+        const e = snap[id] || {};
+        snapModels[id] = { cost: e.cost || null, tiers: e.tiers || null, meta: e.meta || null, usage: null };
+      }
+      const capChanges = detectCapChanges(stateDir, snapModels);
+      const snapFree = snap && typeof snap.freeModels === 'object' && snap.freeModels !== null && !Array.isArray(snap.freeModels)
+        ? Object.keys(snap.freeModels)
+        : Array.isArray(snap && snap.freeModels)
+          ? snap.freeModels.filter((x) => typeof x === 'string')
+          : [];
+      const snapZen = snap && typeof snap.zenModels === 'object' && snap.zenModels !== null && !Array.isArray(snap.zenModels)
+        ? Object.keys(snap.zenModels)
+        : Array.isArray(snap && snap.zenModels)
+          ? snap.zenModels.filter((x) => typeof x === 'string')
+          : [];
+      return {
+        status: 'unchanged',
+        models: snap,
+        changes: capChanges.map(capChangeText),
+        capChanges,
+        freeModels: snapFree,
+        zenModels: snapZen
+      };
    }
 
   if (!res.ok) {
@@ -494,6 +530,10 @@ async function runPriceWatch(stateDir) {
       ? prev.freeModels
       : {};
   if (prev && typeof prev === 'object' && prev.freeModels != null) delete prev.freeModels;
+  // Zen billable snapshot key (#98): same stripping discipline as freeModels /
+  // modelPrivacy above — it must never be mistaken for a billable opencode-go
+  // model entry in the cost/tiers diff below.
+  if (prev && typeof prev === 'object' && prev.zenModels != null) delete prev.zenModels;
   // Capture the prior privacy map BEFORE stripping it (mirrors prevFree above).
   // If we delete it first, the privacy diff below reads a null baseline and
   // re-emits "Privacy changed for X" every cycle (BUG #85: privacy redup). Keep
@@ -509,6 +549,11 @@ async function runPriceWatch(stateDir) {
   const zenModelsRaw = (zen && zen.models) || {};
   const freeNowIso = new Date().toISOString();
   const freeModels = {};
+  // Zen BILLABLE set (#98): the opencode-provider models that are NOT free.
+  // Persisted as a top-level `zenModels` snapshot map (same shape as a billable
+  // entry: { cost, tiers, meta }) so monitor.js can scope Zen liveness to
+  // Zen-priced + free ids instead of diffing GO-priced ids against Zen serving.
+  const zenBillable = {};
   for (const id of Object.keys(zenModelsRaw)) {
     const m = zenModelsRaw[id] || {};
     if (isFreeModel(id, m)) {
@@ -524,6 +569,12 @@ async function runPriceWatch(stateDir) {
         tiers: m.tiers || null,
         meta: extractModelMeta(m),
         addedAt: priorAdded || freeNowIso
+      };
+    } else {
+      zenBillable[id] = {
+        cost: m.cost || null,
+        tiers: m.tiers || null,
+        meta: extractModelMeta(m)
       };
     }
   }
@@ -694,9 +745,12 @@ async function runPriceWatch(stateDir) {
     // Persist opencode-go models plus the independent free-model list. The
     // top-level `freeModels` key is stripped before the cost/tiers diff on the
     // next run (see prevFree handling above), so the billable comparison is
-    // never perturbed by its presence here.
+    // never perturbed by its presence here. `zenModels` (Zen billable, #98)
+    // rides the same way for Zen liveness scoping — stripped before the diff,
+    // never part of the Go comparison.
     const snapshot = Object.assign({}, modelsMap);
     snapshot.freeModels = freeModels;
+    snapshot.zenModels = zenBillable;
     snapshot.modelPrivacy = modelPrivacyMap;
     fs.writeFileSync(snapFile, JSON.stringify(snapshot, null, 2));
     if (newEtag) fs.writeFileSync(etagFile, newEtag);
@@ -731,7 +785,8 @@ async function runPriceWatch(stateDir) {
     changes,
     modelChanges,
     modelCount: newIds.size,
-    freeModels: Object.keys(freeModels)
+    freeModels: Object.keys(freeModels),
+    zenModels: Object.keys(zenBillable)
   };
 }
 

@@ -7,7 +7,7 @@ const delivery = require('./delivery');
 const { runPriceWatch } = require('./price-watch');
 const { runCapsWatch } = require('./caps-watch');
 const { runCatalogWatch } = require('./catalog-watch');
-const { runLivenessWatch, runZenLivenessWatch, classifyOutage } = require('./liveness-watch');
+const { runLivenessWatch, runZenLivenessWatch, buildZenPricedSet, classifyOutage } = require('./liveness-watch');
 const { runUsage } = require('./usage');
 const { runConfigScan } = require('./config-scan');
 const { runAtomWatch } = require('./atom-watch');
@@ -231,10 +231,19 @@ async function main() {
 
     // v0.15.0 (#96): Zen mirror rides the same 30min liveness block (IDs only).
     // Own ETag + snapshot files; same Bearer key; never throws.
+    // v0.15.1 (#98): scoped to the Zen-priced + free set (api.json opencode
+    // provider billable + snapshot freeModels) — NEVER the opencode-go map.
+    // Go-vs-Zen catalog divergence (Go-only models absent from Zen serving) is
+    // expected, not a withdrawal. Falls back to the snapshot-nested maps so a
+    // 304/unknown pricing cycle still scopes correctly.
+    const zenPricedIds = buildZenPricedSet(
+      (pricing && pricing.zenModels) || (modelsMap && modelsMap.zenModels),
+      (pricing && pricing.freeModels) || (modelsMap && modelsMap.freeModels)
+    );
     const livenessZen = await runZenLivenessWatch(
       stateDir,
       config.authJsonPath,
-      modelsMap,
+      zenPricedIds,
       usage && usage.status,
       usage && usage.error
     ).catch((e) => ({
@@ -389,8 +398,13 @@ async function main() {
             dedupTtlMs: 3600000
           })
         );
-        // Zen mirror (v0.15.0, #96): own ETag/snapshot, same 30min cadence.
-        runZenLivenessWatch(stateDir, config.authJsonPath, (p && p.models) || {}).catch((e) =>
+        // Zen mirror (v0.15.0, #96; scoped v0.15.1, #98): own ETag/snapshot,
+        // same 30min cadence. Zen-priced + free scope only — never Go-priced.
+        const zp = buildZenPricedSet(
+          (p && (p.zenModels || (p.models && p.models.zenModels))) || {},
+          (p && (p.freeModels || (p.models && p.models.freeModels))) || []
+        );
+        runZenLivenessWatch(stateDir, config.authJsonPath, zp).catch((e) =>
           delivery.alert('warning', 'liveness-zen-watch failed', String(e && e.message ? e.message : e), {
             dedupKey: 'monitor:liveness-zen-watch',
             dedupTtlMs: 3600000
