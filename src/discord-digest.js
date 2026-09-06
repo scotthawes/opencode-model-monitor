@@ -16,7 +16,9 @@ const CHUNK_MAX = 1900;
 const CHANGELOG_RETENTION_MS = changeMetric.QUOTA_WINDOW_MS;
 
 // Max bullets / events surfaced in the digest before we say "+N more".
-const MAX_EVENTS = 5;
+// v0.18.0 (#107): top-8 (was top-5) so surfaced anomaly/meta/privacy lines
+// can't push real moves out of the digest.
+const MAX_EVENTS = 8;
 
 // Windows we surface by default in the quota section.
 const WINDOWS = ['rolling', 'weekly', 'monthly'];
@@ -277,8 +279,17 @@ function buildDigestChunks(report, opts) {
   const eventCount = events.length;
 
   // Fix f: prioritize model_change events in "What changed" (model events
-  // first, then quota crossings / other levels), each group newest-first.
-  const priorityOf = (e) => (e && e.level === 'model_change' ? 0 : 1);
+  // first, then model-ish warnings/info, then everything else), each group
+  // newest-first. v0.18.0 (#107): every surfaced type rides at model_change
+  // level, but warnings/info with model-ish titles (anomaly/meta/liveness)
+  // still sort above generic quota noise so nothing real is buried.
+  const MODELISH_RE = /model|anomaly|meta|privacy|quota|liveness|deprecat|withdraw|serving|tiers|digest/i;
+  const priorityOf = (e) => {
+    if (e && e.level === 'model_change') return 0;
+    if (e && (e.level === 'warning' || e.level === 'critical' || e.level === 'info') &&
+        MODELISH_RE.test(`${e.title || ''} ${e.message || ''}`)) return 1;
+    return 2;
+  };
   const sortedEvents = events.slice().sort((a, b) => {
     const pa = priorityOf(a);
     const pb = priorityOf(b);
@@ -483,4 +494,4 @@ async function postDigest(opts) {
   return chunks;
 }
 
-module.exports = { buildDigestChunks, postDigest, chunkText, readReport, CHUNK_MAX, warnDateFor, critDateFor };
+module.exports = { buildDigestChunks, postDigest, chunkText, readReport, CHUNK_MAX, MAX_EVENTS, warnDateFor, critDateFor };

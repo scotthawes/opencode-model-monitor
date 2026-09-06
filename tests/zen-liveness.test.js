@@ -239,7 +239,7 @@ test('buildZenPricedSet unions billable + free, drops reserved keys', () => {
   assert.deepStrictEqual(buildZenPricedSet('nope', 42), []);
 });
 
-test('zen dedup uses bumped liveness-zen3 prefix (no stale suppression)', async () => {
+test('zen shrinkage routes withdrawn through the model-change table (v0.18 #107)', async () => {
   const d = tmpDir();
   try {
     setup(d);
@@ -248,22 +248,20 @@ test('zen dedup uses bumped liveness-zen3 prefix (no stale suppression)', async 
     mockZenFetch(['zen-a', 'zen-gone']);
     const r0 = await runZenLivenessWatch(d, auth, ['zen-a', 'zen-gone'], 'ok', null);
     assert.deepStrictEqual(r0.withdrawn, []);
-    // ...then shrinkage of zen-gone alerts under the zen3 prefix.
+    // ...then shrinkage of zen-gone rides deliverModelChangeTable (ONE
+    // model_change line: JSONL `withdrawn` event + alerts.log/changelog +
+    // Discord table), deduped per-model like every other model change.
     mockZenFetch(['zen-a']);
     const r = await runZenLivenessWatch(d, auth, ['zen-a', 'zen-gone'], 'ok', null);
     assert.deepStrictEqual(r.withdrawn, ['zen-gone']);
     const dedup = JSON.parse(fs.readFileSync(path.join(d, 'dedup.json'), 'utf8'));
     assert.ok(
-      Object.keys(dedup).includes('reserved:liveness-zen3:missing:zen-gone'),
-      'expected bumped dedup key, got: ' + JSON.stringify(Object.keys(dedup))
+      Object.keys(dedup).includes('model:zengone'),
+      'expected per-model table dedup key, got: ' + JSON.stringify(Object.keys(dedup))
     );
     assert.ok(
-      !Object.keys(dedup).some((k) => k === 'reserved:liveness-zen2:missing:zen-gone'),
-      'old prefix must not be written'
-    );
-    assert.ok(
-      !Object.keys(dedup).some((k) => k === 'reserved:liveness-zen:missing:zen-gone'),
-      'oldest prefix must not be written'
+      !Object.keys(dedup).some((k) => String(k).startsWith('reserved:liveness-zen')),
+      'legacy warning-prefix keys must not be written'
     );
   } finally {
     restoreFetch();

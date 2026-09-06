@@ -24,6 +24,12 @@
 //      failure is a quota/auth issue, not an outage. See classifyOutage().
 //
 // Best-effort, never throws. ETag + 15s timeout like the other watchers.
+//
+// v0.18.0 (#107): withdrawn ids ride the model-change table (ONE model_change
+// line each: JSONL `withdrawn` event + alerts.log/changelog + Discord table)
+// instead of a bare warning, so all five surfaces agree. The per-id hourly
+// warning dedup becomes the table's per-model 24h dedup — consistent with
+// every other model change.
 
 const fs = require('fs');
 const path = require('path');
@@ -287,13 +293,11 @@ async function runLivenessWatchWith(stateDir, authJsonPath, pricedModels, usageS
     const withdrawn = computeShrinkage(priorIds, servingIds);
     const changes = [];
     for (const id of withdrawn) {
-      const msg = `was serving, now gone: ${id}`;
-      changes.push(msg);
+      changes.push(`was serving, now gone: ${id}`);
+    }
+    if (withdrawn.length) {
       try {
-        delivery.alert('warning', 'Model stopped serving', msg, {
-          dedupKey: `${dedupPrefix}${id}`,
-          dedupTtlMs: 3600000
-        });
+        await delivery.deliverModelChangeTable(withdrawn.map((id) => ({ subtype: 'withdrawn', model: id })));
       } catch (_) {
         // best effort
       }
@@ -311,13 +315,11 @@ async function runLivenessWatchWith(stateDir, authJsonPath, pricedModels, usageS
   const changes = [];
 
   for (const id of withdrawn) {
-    const msg = `priced but not serving: ${id}`;
-    changes.push(msg);
+    changes.push(`priced but not serving: ${id}`);
+  }
+  if (withdrawn.length) {
     try {
-      delivery.alert('warning', 'Model not serving', msg, {
-        dedupKey: `${dedupPrefix}${id}`,
-        dedupTtlMs: 3600000
-      });
+      await delivery.deliverModelChangeTable(withdrawn.map((id) => ({ subtype: 'withdrawn', model: id })));
     } catch (_) {
       // best effort
     }

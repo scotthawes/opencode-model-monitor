@@ -6,7 +6,9 @@
 // Each line is one immutable fact:
 //
 //   { "ts": "<ISO>", "type": "added|removed|cost-changed|tiers-changed
-//                      |free-available|free-changed|free-removed",
+//                      |free-available|free-changed|free-removed
+//                      |privacy-changed|deprecated|withdrawn|anomaly|meta-changed
+//                      |quota-changed",
 //     "model": "<id>", "old": <prev cost/tiers|null>, "new": <next cost/tiers|null> }
 //
 // Files rotate monthly: state/events-YYYY-MM.jsonl (UTC month of the event's
@@ -123,8 +125,12 @@ function getModelLife(stateDir, model) {
   return readEvents(stateDir, { model });
 }
 
-// Map a model-change descriptor (from price-watch / delivery) to a JSONL event
-// record. Returns null for descriptors we don't model (e.g. feed updates).
+// Map a model-change descriptor (from price-watch / catalog / liveness /
+// delivery) to a JSONL event record. Returns null for descriptors we don't
+// model (e.g. feed updates).
+// v0.18.0 (#107): every detected change type maps to a first-class JSONL type
+// (dedup-safe via the sig set in appendChanges): privacy-changed, deprecated,
+// withdrawn (Go + Zen liveness), anomaly (sudden-jump), meta-changed.
 function eventForChange(ch) {
   if (!ch || !ch.subtype) return null;
   const base = { model: ch.model };
@@ -173,6 +179,37 @@ function eventForChange(ch) {
         new: ch.cost != null ? ch.cost : null,
         availableFrom: ch.availableFrom,
         duration: ch.duration
+      });
+    case 'privacy':
+      return Object.assign({}, base, {
+        type: 'privacy-changed',
+        old: ch.old !== undefined ? ch.old : null,
+        new: ch.new !== undefined ? ch.new : null,
+        note: ch.note
+      });
+    case 'deprecated':
+      return Object.assign({}, base, {
+        type: 'deprecated',
+        old: null,
+        new: ch.meta != null ? ch.meta : { deprecated: true }
+      });
+    case 'withdrawn':
+      return Object.assign({}, base, {
+        type: 'withdrawn',
+        old: null,
+        new: null
+      });
+    case 'anomaly':
+      return Object.assign({}, base, {
+        type: 'anomaly',
+        old: ch.oldCost != null ? ch.oldCost : null,
+        new: ch.newCost != null ? ch.newCost : null
+      });
+    case 'meta':
+      return Object.assign({}, base, {
+        type: 'meta-changed',
+        old: ch.old !== undefined ? ch.old : null,
+        new: ch.new !== undefined ? ch.new : null
       });
     default:
       return null;

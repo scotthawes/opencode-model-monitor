@@ -3,7 +3,6 @@
 const fs = require('fs');
 const path = require('path');
 const delivery = require('./delivery');
-const events = require('./events'); // v0.8.0: event-sourced history (JSONL, #73)
 const changeMetric = require('./change-metric'); // shared Δ% / × / $ formatting
 const usageTable = require('./usage-table'); // effective-price multiplier + seeded caps
 
@@ -623,28 +622,32 @@ async function runPriceWatch(stateDir) {
         // emits an hourly-deduped warning (would have flagged the hy3 8x); a
         // model whose cost did NOT move but whose tracked meta did emits one
         // info-level, per-field-deduped line per changed field.
+        // v0.18.0 (#107): anomaly + meta are first-class table/JSONL events
+        // (ONE model_change line each via deliverModelChangeTable). The direct
+        // warning/info alerts are gone: the table line carries the same text at
+        // model_change level, so `changes` (report-only strings) + the funnel
+        // stay duplicate-free and meta reaches default Discord subscribers.
         try {
           const bMeta = (modelsMap[id] || {}).meta || null;
           const costMoved = JSON.stringify(a.cost) !== JSON.stringify(b.cost);
           if (costMoved) {
             const text = changeMetric.anomalyText(id, a.cost, b.cost);
             if (text) {
-              delivery.alert('warning', `Anomaly: ${id} sudden price jump`, text, {
-                dedupKey: 'anomaly:' + String(id).toLowerCase().replace(/[^a-z0-9]/g, ''),
-                dedupTtlMs: 3600000
-              });
               changes.push(text);
+              modelChanges.push({ subtype: 'anomaly', model: id, oldCost: a.cost || null, newCost: b.cost || null, meta: bMeta });
             }
           } else {
             const diffs = changeMetric.diffMeta(a.meta, bMeta);
             if (diffs.length) {
-              const fmtV = (v) => (v == null ? '?' : typeof v === 'object' ? JSON.stringify(v) : String(v));
-              for (const d of diffs) {
-                delivery.alert('info', `Meta changed for ${id}`, `${d.field} ${fmtV(d.old)}→${fmtV(d.new)}`, {
-                  dedupKey: 'meta:' + String(id).toLowerCase().replace(/[^a-z0-9]/g, '') + ':' + d.field
-                });
-              }
               changes.push(changeMetric.metaChangeText(id, a.meta, bMeta));
+              // One descriptor per model (old/new = field→value maps).
+              const metaOld = {};
+              const metaNew = {};
+              for (const d of diffs) {
+                metaOld[d.field] = d.old == null ? null : d.old;
+                metaNew[d.field] = d.new == null ? null : d.new;
+              }
+              modelChanges.push({ subtype: 'meta', model: id, old: metaOld, new: metaNew, meta: bMeta });
             }
           }
         } catch (_) {
@@ -737,9 +740,11 @@ async function runPriceWatch(stateDir) {
 
   // --- Privacy / training-status change detection (v0.11.0, #83) ------------
   // Dormant unless api.json carries a `privacy` block (it does not today), so
-  // this is a no-op in production. If/when it appears, we log a privacy-changed
-  // event + a non-fatal model_change line. Privacy milestones otherwise come
-  // from the external seed (log-only, scripts/seed-external-changelog.js).
+  // this is a no-op in production. If/when it appears, the move rides the
+  // model-change table (one model_change line + JSONL privacy-changed event,
+  // v0.18.0 #107) instead of a direct JSONL append, so all five surfaces agree.
+  // Privacy milestones otherwise come from the external seed (log-only,
+  // scripts/seed-external-changelog.js).
   const modelPrivacyMap = {};
   if (prevValid) {
     for (const id of newIds) {
@@ -749,13 +754,7 @@ async function runPriceWatch(stateDir) {
       const ch = detectPrivacyChanges(id, prevP, curr);
       if (ch) {
         changes.push(`Privacy changed for ${id}: ${delivery.formatPrivacyWords(ch.old)} -> ${delivery.formatPrivacyWords(ch.new)}`);
-        events.appendEvent(stateDir, {
-          ts: new Date().toISOString(),
-          type: 'privacy-changed',
-          model: id,
-          old: ch.old,
-          new: ch.new
-        });
+        modelChanges.push({ subtype: 'privacy', model: id, old: ch.old, new: ch.new, meta: (modelsMap[id] || {}).meta || null });
       }
     }
   }
