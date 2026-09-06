@@ -223,7 +223,7 @@ test('digest "What changed" lists model_change before quota crossings', () => {
         ts: tsNew,
         level: 'model_change',
         title: 'Model changed',
-        message: 'Cost changed for hy3: {"input":0.0175} -> {"input":0.14}'
+        message: '🔴 Hy3 (hy3) input $0.0175→$0.14 (+700%, 8x, +$0.1225) · Eff 1x'
       }
     ];
     fs.writeFileSync(path.join(d, 'changelog.json'), JSON.stringify(events));

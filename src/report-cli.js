@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const events = require('./events'); // v0.8.0: event-sourced history (JSONL, #73)
+const delivery = require('./delivery'); // unified cost-change text (Fix 2, #88)
 
 const stateDir = path.join(__dirname, '..', 'state');
 const mdPath = path.join(stateDir, 'report.md');
@@ -59,7 +60,9 @@ if (process.argv.includes('--events')) {
     const tag = typeLabel[ev.type] || ev.type;
     let detail = '';
     if (ev.type === 'cost-changed') {
-      detail = `  ${JSON.stringify(ev.old)} -> ${JSON.stringify(ev.new)}`;
+      // Unified metric-delta shape (Fix 2, #88) — same text as the changelog
+      // and the digest, so every surface renders a cost move identically.
+      detail = `  ${delivery.costChangeHumanText(ev.model, ev.old, ev.new, { meta: ev.meta })}`;
     } else if (ev.type === 'added' || ev.type === 'free-available') {
       detail = `  new cost ${JSON.stringify(ev.new)}`;
     } else if (ev.type === 'removed' || ev.type === 'free-removed') {
@@ -79,13 +82,10 @@ if (process.argv.includes('--events')) {
 // or null if the line is not a pricing event for `model` (e.g. a feed update).
 function parseChangelogLineForModel(msg, model) {
   let m;
-  if ((m = /^Cost changed for (\S+): ([\s\S]*) -> ([\s\S]*)$/.exec(msg))) {
-    if (m[1] !== model) return null;
-    let oldC = null;
-    let newC = null;
-    try { oldC = JSON.parse(m[2]); } catch (_) {}
-    try { newC = JSON.parse(m[3]); } catch (_) {}
-    return { type: 'cost-changed', old: oldC, new: newC };
+  const cost = events.parseCostLine(msg);
+  if (cost) {
+    if (cost.model !== model) return null;
+    return { type: 'cost-changed', old: cost.old, new: cost.new };
   }
   if ((m = /^Added model: (\S+)$/.exec(msg))) {
     if (m[1] !== model) return null;

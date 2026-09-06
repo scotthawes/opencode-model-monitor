@@ -46,14 +46,14 @@ test('TL;DR lists a model change under "What changed"', () => {
         ts,
         level: 'model_change',
         title: 'Model changed',
-        message: 'Cost changed for hy3: {"input":0.0175} -> {"input":0.14}'
+        message: '🔴 Hy3 (hy3) input $0.0175→$0.14 (+700%, 8x, +$0.1225) · Eff 1x'
       }
     ];
     fs.writeFileSync(path.join(d, 'changelog.json'), JSON.stringify(events));
     const chunks = discordDigest.buildDigestChunks(REPORT, { stateDir: d });
     assert.ok(chunks[0].includes('**Monitor**'), chunks[0]);
     assert.ok(chunks[0].includes('What changed'), chunks[0]);
-    assert.ok(chunks[0].includes('0.0175→0.14'), chunks[0]);
+    assert.ok(chunks[0].includes('0.0175→$0.14'), chunks[0]);
   } finally {
     fs.rmSync(d, { recursive: true, force: true });
   }
@@ -78,7 +78,7 @@ test('model_change surfaces even when older than the last 20 events', () => {
       ts: new Date(now - 29 * 3600e3).toISOString(),
       level: 'model_change',
       title: 'Model changed',
-      message: 'Cost changed for hy3: {"input":0.0175} -> {"input":0.14}'
+      message: '🔴 Hy3 (hy3) input $0.0175→$0.14 (+700%, 8x, +$0.1225) · Eff 1x'
     });
     // Plus a fresh model_change at the very end.
     events.push({
@@ -91,7 +91,7 @@ test('model_change surfaces even when older than the last 20 events', () => {
     const chunks = discordDigest.buildDigestChunks(REPORT, { stateDir: d });
     const body = chunks[0];
     assert.ok(body.includes('What changed'), 'has What changed section');
-    assert.ok(body.includes('0.0175→0.14'), 'old model_change must surface beyond last-20: ' + body);
+    assert.ok(body.includes('0.0175→$0.14'), 'old model_change must surface beyond last-20: ' + body);
     assert.ok(body.includes('nova'), 'new model_change must surface: ' + body);
   } finally {
     fs.rmSync(d, { recursive: true, force: true });
