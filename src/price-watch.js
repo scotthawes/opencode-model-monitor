@@ -148,14 +148,23 @@ function extractModelMeta(m) {
       tool_call: !!m.tool_call,
       reasoning: !!m.reasoning,
       attachment: !!m.attachment,
-      structured_output: !!m.structured_output,
+      // Preserve absent-vs-false: a field not present in the catalog is null
+      // (unknown), an explicit `false` stays false. Avoids silently upgrading
+      // "unknown" to "no" (audit fix, #88).
+      structured_output: 'structured_output' in m ? !!m.structured_output : null,
       temperature: !!m.temperature,
-      interleaved: !!m.interleaved,
+      interleaved: 'interleaved' in m ? !!m.interleaved : null,
       modalities
     };
   }
+  // Carry the free-text description into meta (don't drop it) — used by the
+  // changelog "desc-unverified" junk flag. `name` takes precedence when both
+  // are present (audit fix, #88).
+  const description = typeof m.description === 'string' ? m.description : null;
+  const status = typeof m.status === 'string' ? m.status : null;
   return {
     name: typeof m.name === 'string' ? m.name : null,
+    description,
     family: typeof m.family === 'string' ? m.family : null,
     provider,
     contextWindow: limit && typeof limit.context === 'number' ? limit.context : null,
@@ -164,7 +173,9 @@ function extractModelMeta(m) {
     open_weights: typeof m.open_weights === 'boolean' ? m.open_weights : null,
     knowledge: m.knowledge != null ? m.knowledge : null,
     release_date: typeof m.release_date === 'string' ? m.release_date : null,
-    last_updated: typeof m.last_updated === 'string' ? m.last_updated : null
+    last_updated: typeof m.last_updated === 'string' ? m.last_updated : null,
+    status,
+    deprecated: status === 'deprecated'
   };
 }
 
@@ -211,6 +222,30 @@ function formatFreeDuration(ms) {
   }
   const min = Math.max(1, Math.floor(ms / 60000));
   return min + (min === 1 ? ' minute' : ' minutes');
+}
+
+// Normalize a tiers array to a comparable signature: each tier reduced to
+// {type, size}, sorted by type. Used to skip "tiers-only" changes that are
+// pure reorderings (Fix 3, #88) — a real move still changes the signature.
+function tiersNormalizedEqual(a, b) {
+  const norm = (tiers) => {
+    const arr = Array.isArray(tiers) ? tiers : [];
+    return arr
+      .map((t) => {
+        let type = null;
+        let size = null;
+        if (typeof t === 'string') {
+          type = t;
+        } else if (t && typeof t === 'object') {
+          type = t.type || t.label || null;
+          size = typeof t.size === 'number' ? t.size : null;
+        }
+        return type == null ? null : { type, size };
+      })
+      .filter(Boolean)
+      .sort((x, y) => (x.type < y.type ? -1 : x.type > y.type ? 1 : 0));
+  };
+  return JSON.stringify(norm(a)) === JSON.stringify(norm(b));
 }
 
 // A model is "free" when its id ends in `-free`/`:free` (the opencode Zen
@@ -508,17 +543,14 @@ async function runPriceWatch(stateDir) {
         const a = prev[id] || {};
         const b = modelsMap[id] || {};
         if (JSON.stringify(a.cost) !== JSON.stringify(b.cost)) {
-          // PR page spec #4: append the change metric (Δ% / × / $) to the cost
-          // line so report.md states the magnitude, not just old→new. Prefer
-          // output $/1M, fall back to input.
-          const cm =
-            changeMetric.fmtChangeMetric(a.cost && a.cost.output, b.cost && b.cost.output) ||
-            changeMetric.fmtChangeMetric(a.cost && a.cost.input, b.cost && b.cost.input);
-          const base = `Cost changed for ${id}: ${JSON.stringify(a.cost)} -> ${JSON.stringify(b.cost)}`;
-          changes.push(cm ? `${base}  | ${cm}` : base);
+          // Fix 2 (#88): the report's "Changes detected" list now uses the same
+          // single metric-delta shape as the changelog / digest (no raw JSON).
+          changes.push(
+            delivery.costChangeHumanText(id, a.cost, b.cost, { meta: (modelsMap[id] || {}).meta || null })
+          );
           modelChanges.push({ subtype: 'cost', model: id, oldCost: a.cost || null, newCost: b.cost || null, meta: (modelsMap[id] || {}).meta || null });
         }
-        if (JSON.stringify(a.tiers) !== JSON.stringify(b.tiers)) {
+        if (JSON.stringify(a.tiers) !== JSON.stringify(b.tiers) && !tiersNormalizedEqual(a.tiers, b.tiers)) {
           changes.push(`Tiers changed for ${id}`);
           // Carry old/new tiers so the event log records the actual change.
           modelChanges.push({
@@ -627,7 +659,7 @@ async function runPriceWatch(stateDir) {
       modelPrivacyMap[id] = curr;
       const ch = detectPrivacyChanges(id, prevP, curr);
       if (ch) {
-        changes.push(`Privacy changed for ${id}: ${JSON.stringify(ch.old)} -> ${JSON.stringify(ch.new)}`);
+        changes.push(`Privacy changed for ${id}: ${delivery.formatPrivacyWords(ch.old)} -> ${delivery.formatPrivacyWords(ch.new)}`);
         events.appendEvent(stateDir, {
           ts: new Date().toISOString(),
           type: 'privacy-changed',
@@ -726,7 +758,7 @@ function isValidSnapshot(obj) {
   });
 }
 
-module.exports = { runPriceWatch, appendPriceHistory, extractModelMeta, isFreeModel, validateApiShape, computeCapChanges, readPrevCaps, writeCurrentCaps, detectCapChanges, extractPrivacy, detectPrivacyChanges, formatFreeDuration };
+module.exports = { runPriceWatch, appendPriceHistory, extractModelMeta, isFreeModel, validateApiShape, computeCapChanges, readPrevCaps, writeCurrentCaps, detectCapChanges, extractPrivacy, detectPrivacyChanges, formatFreeDuration, tiersNormalizedEqual };
 
 // Human-readable single line for a cap change (used in the report's "Changes
 // detected" list and as the model_change changelog message so the digest can

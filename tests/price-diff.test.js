@@ -97,8 +97,13 @@ test('detects a cost change (old -> new)', async () => {
     mockFetch({ a: mk({ input: 2 }) });
     const r = await runPriceWatch(d);
     assert.ok(
-      r.changes.some((c) => c.includes('Cost changed for a:') && c.includes('{"input":1}') && c.includes('{"input":2}')),
-      'expected a cost-change line with old/new values, got: ' + JSON.stringify(r.changes)
+      r.changes.some((c) => c.includes('(a)') && c.includes('$1→$2') && c.includes('+100%')),
+      'expected a cost-change line in the unified metric-delta shape, got: ' + JSON.stringify(r.changes)
+    );
+    // Fix 2 (#88): no raw JSON dump in the cost-change line.
+    assert.ok(
+      !r.changes.some((c) => c.includes('{"input":1}') || c.includes('Cost changed for')),
+      'cost-change line must not contain raw JSON, got: ' + JSON.stringify(r.changes)
     );
   } finally {
     fs.rmSync(d, { recursive: true, force: true });
@@ -165,8 +170,12 @@ test('metadata extraction preserves cost diff (additive, never breaks cost/tiers
     const r = await runPriceWatch(d);
     // Cost diff must still be detected exactly as before.
     assert.ok(
-      r.changes.some((c) => c.includes('Cost changed for a:') && c.includes('{"input":1}') && c.includes('{"input":2}')),
-      'expected cost-change line preserved, got: ' + JSON.stringify(r.changes)
+      r.changes.some((c) => c.includes('(a)') && c.includes('$1→$2') && c.includes('+100%')),
+      'expected cost-change line preserved in unified shape, got: ' + JSON.stringify(r.changes)
+    );
+    assert.ok(
+      !r.changes.some((c) => c.includes('{"input":1}') || c.includes('Cost changed for')),
+      'cost-change line must not contain raw JSON, got: ' + JSON.stringify(r.changes)
     );
     // And the structured change must carry the metadata.
     const change = (r.modelChanges || []).find((c) => c.model === 'a' && c.subtype === 'cost');

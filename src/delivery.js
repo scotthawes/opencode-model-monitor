@@ -1397,6 +1397,199 @@ function providerShort(p) {
   return i >= 0 ? s.slice(i + 1) : s;
 }
 
+// Pretty-print a model id as a title-cased name: split on -_.: and capitalize
+// each part. "hy3-alpha" -> "Hy3 Alpha", "ox.alpha.free" -> "Ox Alpha Free".
+function prettyId(id) {
+  const s = String(id == null ? '' : id);
+  return s
+    .split(/[-_.:]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
+// Junk / boilerplate detection for a model description. A description is junk
+// when it is duplicated across models (dupCount > 1), too short (<30 chars), or
+// "meme-case" (random internal casing / leetspeak). Junk descriptions must never
+// be printed verbatim — the caller falls back to the pretty id and appends a
+// "desc-unverified" marker instead.
+function isJunkDesc(desc, dupCount) {
+  if (!desc || typeof desc !== 'string') return false;
+  const t = desc.trim();
+  if (!t) return false;
+  if (dupCount != null && dupCount > 1) return true;
+  if (t.length < 30) return true;
+  // meme-case: an inner lowercase letter followed by an uppercase (camel/meme),
+  // or a capital sandwiched between lowercase (mEmE). Pure all-caps short shouts
+  // also count. (Legitimate ids like "hy3" keep their digit — we do NOT treat a
+  // digit adjacent to a letter as leetspeak, or normal names would false-flag.)
+  if (/[a-z][A-Z]/.test(t)) return true;
+  if (/[A-Z][a-z][A-Z]/.test(t)) return true;
+  if (t === t.toUpperCase() && /[A-Z]{3,}/.test(t) && t.length < 14) return true;
+  return false;
+}
+
+// Resolve the display name for a model. Prefers meta.name when it is present and
+// not junk; otherwise falls back to a pretty title-cased id. Returns { name, junk }
+// so the caller can append a "desc-unverified" marker when the description was
+// junk. `dupCount` lets the caller mark a description reused across models.
+function modelDisplayName(model, meta, dupCount) {
+  const raw = meta && typeof meta === 'object' && typeof meta.name === 'string' ? meta.name.trim() : '';
+  const junk = raw ? isJunkDesc(raw, dupCount) : false;
+  const name = junk || !raw ? prettyId(model) : raw;
+  return { name, junk };
+}
+
+// Capability tags (tool/rsn/att/so/...) from a meta.capabilities block, joined
+// by '+'. Absent/empty capabilities -> em-dash so the line stays readable.
+function capTags(meta) {
+  const c = meta && meta.capabilities;
+  if (!c || typeof c !== 'object') return '—';
+  const tags = [];
+  if (c.tool_call) tags.push('tool');
+  if (c.reasoning) tags.push('rsn');
+  if (c.attachment) tags.push('att');
+  if (c.structured_output) tags.push('so');
+  if (c.temperature) tags.push('temp');
+  if (c.interleaved) tags.push('iv');
+  const inp = c.modalities && c.modalities.input;
+  if (Array.isArray(inp)) {
+    if (inp.includes('image')) tags.push('img');
+    if (inp.includes('audio')) tags.push('aud');
+  }
+  return tags.length ? tags.join('+') : '—';
+}
+
+// A single, human-scannable cost-change line used by the changelog, the report's
+// "Changes detected" list, and the digest — ONE format on every surface:
+//   "🔴 <Name> (<id>) output $A→$B (+P%, Nx, +$D) · in $C→$E · Eff Nx"
+// Prefers the output metric (the page headline); falls back to input when output
+// is absent. cache_read is dropped unless it actually moved. Never throws.
+function costChangeHumanText(model, oldCost, newCost, opts) {
+  opts = opts || {};
+  const meta = opts.meta;
+  const dn = modelDisplayName(model, meta);
+  const o = oldCost && typeof oldCost === 'object' ? oldCost : {};
+  const n = newCost && typeof newCost === 'object' ? newCost : {};
+
+  const useOutput = typeof o.output === 'number' || typeof n.output === 'number';
+  const primaryKey = useOutput ? 'output' : 'input';
+  const pa = o[primaryKey];
+  const pb = n[primaryKey];
+  const primaryMetric = changeMetric.fmtChangeMetric(
+    typeof pa === 'number' ? pa : null,
+    typeof pb === 'number' ? pb : null
+  );
+  const primary = `${primaryKey} $${fmtModelCost(pa)}→$${fmtModelCost(pb)}` + (primaryMetric ? ` ${primaryMetric}` : '');
+
+  let secondary = '';
+  if (useOutput) {
+    const ia = o.input;
+    const ib = n.input;
+    const inMetric = changeMetric.fmtChangeMetric(
+      typeof ia === 'number' ? ia : null,
+      typeof ib === 'number' ? ib : null
+    );
+    secondary = ` · in $${fmtModelCost(ia)}→$${fmtModelCost(ib)}` + (inMetric ? ` ${inMetric}` : '');
+  }
+
+  let eff = '';
+  try {
+    const mult = usageTable.effectiveMultiplier(model);
+    eff = ` · Eff ${fmtMult(mult)}`;
+  } catch (_) {
+    eff = '';
+  }
+
+  return `🔴 ${dn.name} (${model}) ${primary}${secondary}${eff}`;
+}
+
+// Map a privacy/training descriptor to plain words (never raw JSON / null):
+//   training true  -> "trains", false -> "no-train", absent -> "unknown"
+//   zdrValidUntil   -> "ZDR until <date>"   (otherwise omitted)
+function formatPrivacyWords(p) {
+  if (!p || typeof p !== 'object') return 'unknown';
+  const t = p.training;
+  let word;
+  if (t === true || t === 'trains' || t === 'train') word = 'trains';
+  else if (t === false || t === 'no-train' || t === 'no_train') word = 'no-train';
+  else word = 'unknown';
+  const parts = ['privacy: ' + word];
+  if (p.zdrValidUntil != null && String(p.zdrValidUntil).trim()) {
+    parts.push('ZDR until ' + String(p.zdrValidUntil).trim());
+  }
+  return parts.join(' · ');
+}
+
+// Compact capability + provenance summary for a model-change line. Family /
+// provider / knowledge are ALWAYS shown (a '?' marker when missing) so gaps in
+// the catalog are never silently swallowed. Never throws.
+function metaShort(meta) {
+  if (!meta || typeof meta !== 'object') return '—';
+  const parts = [];
+  if (meta.contextWindow) parts.push('ctx ' + fmtCtx(meta.contextWindow));
+  const caps = capTags(meta);
+  if (caps !== '—') parts.push(caps);
+  parts.push(meta.family ? 'family:' + meta.family : 'family?');
+  parts.push(meta.provider ? 'provider:' + providerShort(meta.provider) : 'provider?');
+  parts.push(meta.knowledge != null ? 'knowledge:' + meta.knowledge : 'knowledge?');
+  if (meta.deprecated) parts.push('⚠️ deprecated');
+  return parts.length ? parts.join(' · ') : '—';
+}
+
+// --- Tier-label helpers (Fix 3, #88) --------------------------------------
+//
+// A tier is described by its `type` (e.g. "standard", "large-context") and a
+// `size`. The changelog line carries old→new labels plus any bound that moved.
+
+// Short label for a single tier entry (accepts {type,size} or {label,...}).
+function tierType(t) {
+  if (typeof t === 'string') return t;
+  if (!t || typeof t !== 'object') return null;
+  if (typeof t.type === 'string') return t.type;
+  if (typeof t.label === 'string') return t.label;
+  return null;
+}
+
+function tierLabels(tiers) {
+  const arr = Array.isArray(tiers) ? tiers : [];
+  const labels = arr.map(tierType).filter(Boolean);
+  return labels.length ? labels.join('+') : '';
+}
+
+// The moved bound between old/new tiers: a tier type present in both whose size
+// changed ("large-context ctx 256k→1M"), a newly-added tier ("large-context ctx
+// →1M"), or a dropped tier ("large-context ctx 256k→"). Empty when nothing moved.
+function movedTierBound(oldTiers, newTiers) {
+  const a = Array.isArray(oldTiers) ? oldTiers : [];
+  const b = Array.isArray(newTiers) ? newTiers : [];
+  const oldByType = {};
+  for (const t of a) {
+    const ty = tierType(t);
+    if (ty && typeof t.size === 'number') oldByType[ty] = t.size;
+  }
+  const newByType = {};
+  for (const t of b) {
+    const ty = tierType(t);
+    if (ty && typeof t.size === 'number') newByType[ty] = t.size;
+  }
+  // Prefer a tier whose size actually changed.
+  for (const ty of Object.keys(newByType)) {
+    if (oldByType[ty] != null && oldByType[ty] !== newByType[ty]) {
+      return `${ty} ctx ${fmtCtx(oldByType[ty])}→${fmtCtx(newByType[ty])}`;
+    }
+  }
+  // Newly-added bound.
+  for (const ty of Object.keys(newByType)) {
+    if (oldByType[ty] == null) return `${ty} ctx →${fmtCtx(newByType[ty])}`;
+  }
+  // Dropped bound.
+  for (const ty of Object.keys(oldByType)) {
+    if (newByType[ty] == null) return `${ty} ctx ${fmtCtx(oldByType[ty])}→`;
+  }
+  return '';
+}
+
 // Format the effective-price multiplier (MONTHLY_CREDIT / usage-cap) for chat:
 // 4 -> "4x", 1 -> "1x", 0.6 -> "0.6x". Missing/NaN becomes an em-dash.
 function fmtMult(m) {
@@ -1436,20 +1629,62 @@ function modelChangeRowStr(r) {
 }
 
 function modelChangeLineStr(l) {
-  const meta = metaShort(l.meta);
   if (l.subtype === 'added') {
+    // Fix 1 (#88): "🟢 <Name> (<id>) ADDED — in/out $X/$Y per 1M · ctx N · caps+ · cap $C"
+    // display name = meta.name, else a pretty title-cased id; junk descriptions
+    // get the "⚠️ desc-unverified" marker and are never printed verbatim.
+    const dn = modelDisplayName(l.model, l.meta);
     const c = l.cost || {};
-    return `🟢 ${l.model} ADDED — input ${fmtModelCost(c.input)} / output ${fmtModelCost(c.output)}  ·  ${meta}`;
+    let cap = '—';
+    try {
+      cap = '$' + fmtModelCost(usageTable.getUsageCap(l.model, usageTable.silentLog));
+    } catch (_) {
+      cap = '—';
+    }
+    const ctx = l.meta && l.meta.contextWindow ? fmtCtx(l.meta.contextWindow) : '—';
+    let line =
+      `🟢 ${dn.name} (${l.model}) ADDED — in/out $${fmtModelCost(c.input)}/$${fmtModelCost(c.output)} per 1M` +
+      ` · ctx ${ctx} · ${capTags(l.meta)} · cap ${cap}`;
+    if (dn.junk) line += ' · ⚠️ desc-unverified';
+    if (l.meta && l.meta.deprecated) line += ' · ⚠️ deprecated';
+    return line;
   }
-  if (l.subtype === 'removed') return `⚫ ${l.model} REMOVED  ·  ${meta}`;
-  if (l.subtype === 'tiers') return `⚪ ${l.model} TIERS changed  ·  ${meta}`;
+  if (l.subtype === 'removed') {
+    const dn = modelDisplayName(l.model, l.meta);
+    let cap = '—';
+    try {
+      cap = '$' + fmtModelCost(usageTable.getUsageCap(l.model, usageTable.silentLog));
+    } catch (_) {
+      cap = '—';
+    }
+    const ctx = l.meta && l.meta.contextWindow ? fmtCtx(l.meta.contextWindow) : '—';
+    let line =
+      `⚫ ${dn.name} (${l.model}) REMOVED — ctx ${ctx} · ${capTags(l.meta)} · cap ${cap}`;
+    if (dn.junk) line += ' · ⚠️ desc-unverified';
+    if (l.meta && l.meta.deprecated) line += ' · ⚠️ deprecated';
+    return line;
+  }
+  if (l.subtype === 'tiers') {
+    // Fix 3 (#88): tiers carry old→new labels + any moved bound.
+    const dn = modelDisplayName(l.model, l.meta);
+    const oldL = tierLabels(l.oldTiers);
+    const newL = tierLabels(l.newTiers);
+    const bound = movedTierBound(l.oldTiers, l.newTiers);
+    let line = `⚪ ${dn.name} (${l.model}) TIERS ${oldL || '—'} → ${newL || '—'}` + (bound ? ` (${bound})` : '');
+    if (dn.junk) line += ' · ⚠️ desc-unverified';
+    return line;
+  }
   if (l.subtype === 'free') {
     // 🆓 announces a free Zen model; removal/change use distinct markers so the
     // Discord table stays scannable. Additive — never alters billable rows.
+    const dn = modelDisplayName(l.model, l.meta);
     const tag = l.reason === 'removed' ? '⚫' : l.reason === 'changed' ? '🟡' : '🆓';
     const label =
       l.reason === 'removed' ? 'FREE REMOVED' : l.reason === 'changed' ? 'FREE CHANGED' : 'FREE available';
-    return `${tag} ${l.model} ${label}  ·  ${meta}`;
+    let line = `${tag} ${dn.name} (${l.model}) ${label}`;
+    if (dn.junk) line += ' · ⚠️ desc-unverified';
+    if (l.meta && l.meta.deprecated) line += ' · ⚠️ deprecated';
+    return line;
   }
   if (l.subtype === 'tier') {
     // P1-3, #52: second line of the model-change table showing the effective cost
@@ -1471,7 +1706,10 @@ function modelChangeLineStr(l) {
 // changelog + discord-digest regex keep working) for the alerts.log entry.
 function modelChangeHumanMessage(ch) {
   if (ch.subtype === 'cost') {
-    return `Cost changed for ${ch.model}: ${JSON.stringify(ch.oldCost)} -> ${JSON.stringify(ch.newCost)}`;
+    // Fix 2 (#88): replace the raw JSON dump with the single metric-delta shape
+    // shared by the changelog / report / digest. cache_read is dropped unless it
+    // moved (handled inside costChangeHumanText); never emit raw JSON.
+    return costChangeHumanText(ch.model, ch.oldCost, ch.newCost, { meta: ch.meta });
   }
   if (ch.subtype === 'added') return `Added model: ${ch.model}`;
   if (ch.subtype === 'removed') return `Removed model: ${ch.model}`;
@@ -1636,5 +1874,16 @@ module.exports = {
   computeDedupKey,
   humanizeReset,
   debug,
-  buildDiscordPayload
+  buildDiscordPayload,
+  costChangeHumanText,
+  modelChangeHumanMessage,
+  modelChangeLineStr,
+  modelDisplayName,
+  prettyId,
+  isJunkDesc,
+  formatPrivacyWords,
+  capTags,
+  metaShort,
+  tierLabels,
+  movedTierBound
 };

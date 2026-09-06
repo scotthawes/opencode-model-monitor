@@ -98,27 +98,34 @@ function describeEvent(ev) {
   let desc;
   if (lvl === 'model_change') {
     const m = String(ev.message || '');
-    const cost = m.match(/Cost changed for (\S+):\s*(\{[^}]*\})\s*->\s*(\{[^}]*\})/);
-    if (cost) {
-      const model = cost[1];
-      try {
-        const oldC = JSON.parse(cost[2]);
-        const newC = JSON.parse(cost[3]);
-        // Prefer output $/1M (the page's headline metric); fall back to input
-        // when output is absent. PR page spec #4: always carry Δ% / × / $.
-        const useOutput = typeof newC.output === 'number';
-        const o = useOutput ? oldC.output : oldC.input;
-        const n = useOutput ? newC.output : newC.input;
-        const metric = changeMetric.fmtChangeMetric(o, n);
-        desc =
-          `${model} ${useOutput ? 'output' : 'input'} ${fmtNum(o)}→${fmtNum(n)}` +
-          (metric ? ` ${metric}` : '');
-      } catch (_) {
-        desc = `${model} cost changed`;
-      }
+    // Unified metric-delta format (Fix 2, #88): "🔴 <Name> (id) output $A→$B ...".
+    // It already carries the magnitude, so surface it verbatim. Legacy catalog
+    // lines (raw JSON dump) are parsed for backward-compat with old changelogs.
+    if (/^🔴\s+.*?\([\w.-]+\)\s+(output|input)\s+\$/.test(m)) {
+      desc = m;
     } else {
-      // Feed/docs update — summarize the title, drop the commit URL.
-      desc = stripUrl(m) || ev.title || 'model change';
+      const cost = m.match(/Cost changed for (\S+):\s*(\{[^}]*\})\s*->\s*(\{[^}]*\})/);
+      if (cost) {
+        const model = cost[1];
+        try {
+          const oldC = JSON.parse(cost[2]);
+          const newC = JSON.parse(cost[3]);
+          // Prefer output $/1M (the page's headline metric); fall back to input
+          // when output is absent. PR page spec #4: always carry Δ% / × / $.
+          const useOutput = typeof newC.output === 'number';
+          const o = useOutput ? oldC.output : oldC.input;
+          const n = useOutput ? newC.output : newC.input;
+          const metric = changeMetric.fmtChangeMetric(o, n);
+          desc =
+            `${model} ${useOutput ? 'output' : 'input'} ${fmtNum(o)}→${fmtNum(n)}` +
+            (metric ? ` ${metric}` : '');
+        } catch (_) {
+          desc = `${model} cost changed`;
+        }
+      } else {
+        // Feed/docs update — summarize the title, drop the commit URL.
+        desc = stripUrl(m) || ev.title || 'model change';
+      }
     }
   } else {
     desc = ev.title || '';

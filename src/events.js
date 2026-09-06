@@ -204,7 +204,11 @@ const MIGRATION_RE = {
   freeRemoved: /^Free model removed: (\S+)$/
 };
 
-function parseChangelogMessage(msg) {
+// Parse a cost-change changelog line into { model, old, new }. Tolerant of both
+// the legacy JSON-dump format ("Cost changed for X: {...} -> {...}") and the
+// unified metric-delta format ("🔴 <Name> (X) output $A→$B ... · in $C→$E ...").
+// Returns null when the line is not a cost change.
+function parseCostLine(msg) {
   let m;
   if ((m = MIGRATION_RE.cost.exec(msg || ''))) {
     let oldC = null;
@@ -215,8 +219,37 @@ function parseChangelogMessage(msg) {
     try {
       newC = JSON.parse(m[3]);
     } catch (_) {}
-    return { type: 'cost-changed', model: m[1], old: oldC, new: newC };
+    return { model: m[1], old: oldC, new: newC };
   }
+  // New unified format (Fix 2, #88): "🔴 <Name> (<id>) output $A→$B (+..) · in $C→$E ...".
+  const nm =
+    /^🔴\s+.*?\(([\w.-]+)\)\s+(output|input)\s+\$([\d.]+)→\$([\d.]+)/.exec(msg || '');
+  if (nm) {
+    const model = nm[1];
+    const primary = nm[2];
+    const pa = Number(nm[3]);
+    const pb = Number(nm[4]);
+    const oldC = {};
+    const newC = {};
+    oldC[primary] = isFinite(pa) ? pa : null;
+    newC[primary] = isFinite(pb) ? pb : null;
+    // The secondary "in $C→$E" pair (present when output was the primary).
+    const inM = /\bin\s+\$([\d.]+)→\$([\d.]+)/.exec(msg || '');
+    if (inM) {
+      const ia = Number(inM[1]);
+      const ib = Number(inM[2]);
+      oldC.input = isFinite(ia) ? ia : null;
+      newC.input = isFinite(ib) ? ib : null;
+    }
+    return { model, old: oldC, new: newC };
+  }
+  return null;
+}
+
+function parseChangelogMessage(msg) {
+  let m;
+  const cost = parseCostLine(msg);
+  if (cost) return { type: 'cost-changed', model: cost.model, old: cost.old, new: cost.new };
   if ((m = MIGRATION_RE.added.exec(msg || ''))) return { type: 'added', model: m[1], new: null };
   if ((m = MIGRATION_RE.removed.exec(msg || ''))) return { type: 'removed', model: m[1], old: null };
   if ((m = MIGRATION_RE.tiers.exec(msg || ''))) return { type: 'tiers-changed', model: m[1] };
@@ -273,6 +306,7 @@ module.exports = {
   eventForChange,
   appendChanges,
   migrateFromChangelog,
+  parseCostLine,
   eventsFileFor,
   listEventFiles,
   _resetDedup
