@@ -617,6 +617,39 @@ async function runPriceWatch(stateDir) {
             meta: (modelsMap[id] || {}).meta || null
           });
         }
+        // v0.17 insight (#105): sudden-jump anomaly + meta diffs. Additive and
+        // best-effort: any failure is swallowed so the cost/tiers diff above is
+        // never affected. A cost move that is anomalous (>=2x or >=50%) also
+        // emits an hourly-deduped warning (would have flagged the hy3 8x); a
+        // model whose cost did NOT move but whose tracked meta did emits one
+        // info-level, per-field-deduped line per changed field.
+        try {
+          const bMeta = (modelsMap[id] || {}).meta || null;
+          const costMoved = JSON.stringify(a.cost) !== JSON.stringify(b.cost);
+          if (costMoved) {
+            const text = changeMetric.anomalyText(id, a.cost, b.cost);
+            if (text) {
+              delivery.alert('warning', `Anomaly: ${id} sudden price jump`, text, {
+                dedupKey: 'anomaly:' + String(id).toLowerCase().replace(/[^a-z0-9]/g, ''),
+                dedupTtlMs: 3600000
+              });
+              changes.push(text);
+            }
+          } else {
+            const diffs = changeMetric.diffMeta(a.meta, bMeta);
+            if (diffs.length) {
+              const fmtV = (v) => (v == null ? '?' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+              for (const d of diffs) {
+                delivery.alert('info', `Meta changed for ${id}`, `${d.field} ${fmtV(d.old)}→${fmtV(d.new)}`, {
+                  dedupKey: 'meta:' + String(id).toLowerCase().replace(/[^a-z0-9]/g, '') + ':' + d.field
+                });
+              }
+              changes.push(changeMetric.metaChangeText(id, a.meta, bMeta));
+            }
+          }
+        } catch (_) {
+          // best effort — never block the diff
+        }
       }
     }
     for (const id of prevIds) {

@@ -333,6 +333,8 @@ function buildDigestChunks(report, opts) {
   // v0.10.0 (#77): surface the top-3 cheapest effective cost/request models so
   // the digest answers "what's the best deal right now" without opening the page.
   // Effective = list × (60 / cap); computed from the same math as `npm run leaderboard`.
+  // v0.17 (#105): rank arrows (▲/▼/– vs 7d ago, from price history) + $15-cap
+  // upset flags ride on the same line. Best-effort, never blocks the digest.
   try {
     const lbModels = {};
     for (const id of Object.keys(models)) {
@@ -341,11 +343,47 @@ function buildDigestChunks(report, opts) {
     }
     const lb = calc.leaderboard(lbModels, calc.DEFAULT_PATTERN, 3);
     if (lb.length) {
-      const parts = lb.map(
-        (r) =>
-          `${r.id} ($${changeMetric.trimNum(r.effective)}/req, cap $${r.cap})`
-      );
+      let arrows = {};
+      let upsets = [];
+      try {
+        const priceHist = delivery.readPriceHistory();
+        const cutoff = now - changeMetric.QUOTA_WINDOW_MS;
+        const pastCostOf = {};
+        for (const s of priceHist) {
+          const t = s && s.ts ? Date.parse(s.ts) : NaN;
+          if (isNaN(t) || t > cutoff) continue;
+          for (const id of Object.keys((s && s.models) || {})) {
+            const cc = s.models[id] && s.models[id].cost;
+            if (cc && typeof cc === 'object') pastCostOf[id] = cc;
+          }
+        }
+        const pastLbModels = {};
+        for (const id of Object.keys(lbModels)) {
+          pastLbModels[id] = { cost: pastCostOf[id] || lbModels[id].cost };
+        }
+        const nowOrder = calc.leaderboard(lbModels, calc.DEFAULT_PATTERN).map((r) => r.id);
+        const pastOrder = calc.leaderboard(pastLbModels, calc.DEFAULT_PATTERN).map((r) => r.id);
+        arrows = changeMetric.rankArrows(nowOrder, pastOrder);
+        const rawOrder = Object.keys(lbModels)
+          .map((id) => ({ id, raw: calc.costPerRequest(lbModels[id].cost) }))
+          .filter((r) => r.raw != null && isFinite(r.raw) && r.raw > 0)
+          .sort((a, b) => a.raw - b.raw)
+          .map((r) => r.id);
+        const capOf = {};
+        for (const r of calc.leaderboard(lbModels, calc.DEFAULT_PATTERN)) capOf[r.id] = r.cap;
+        upsets = changeMetric.capUpsets(rawOrder, nowOrder, capOf);
+      } catch (_) {
+        arrows = {};
+        upsets = [];
+      }
+      const parts = lb.map((r) => {
+        const a = arrows[r.id] ? arrows[r.id].arrow : '–';
+        return `${a} ${r.id} ($${changeMetric.trimNum(r.effective)}/req, cap $${r.cap})`;
+      });
       c1.push('**Cheapest right now** ' + parts.join(' · '));
+      for (const u of upsets.slice(0, 2)) {
+        c1.push(`⚠️ ${u.id} looks cheap on list (#${u.rawRank}) but sits on a $${u.cap} cap (effective #${u.effRank})`);
+      }
     }
   } catch (_) {
     // best effort — never block the digest
@@ -363,6 +401,8 @@ function buildDigestChunks(report, opts) {
   const chunk1 = c1.join('\n');
 
   // --- chunk 2: quota detail (only if we have usage data) ---
+  // v0.17 (#105): each line also carries burn pts/day + days-to-95 vs reset
+  // plus the acceleration alarm. Best-effort, never blocks the digest.
   let chunk2 = '';
   if (usage.status !== 'unknown' && wins.length) {
     const q = ['**Quota**'];
@@ -373,7 +413,21 @@ function buildDigestChunks(report, opts) {
       // Warn projection only for the headline window (see note above).
       const warn = w === headlineWin ? warnDateFor(history, w, now) : null;
       const warnStr = warn && warn !== 'at/above warn' ? ` · warn ~${warn}` : '';
-      q.push(`• ${w} ${pct}${deltaStr(deltaFor(w))}${reset}${warnStr}`);
+      let burnStr = '';
+      try {
+        const info = delivery.windowInfo(history, w, now);
+        const burn = info ? changeMetric.burnRateInfo(info, wi.resetsAt, now) : null;
+        if (burn) {
+          const rate = burn.ratePerDay >= 10 ? Math.round(burn.ratePerDay * 10) / 10 : Math.round(burn.ratePerDay * 100) / 100;
+          burnStr = ` · burn ${rate}/d, 95% ~${burn.critDateIso ? humanDate(burn.critDateIso) : '?'}`;
+          if (burn.exhaustsBeforeReset) burnStr += ' ⚠️ pre-reset';
+        }
+        const accel = changeMetric.accelerationAlarm(history, w, now);
+        if (accel) burnStr += ` · ⚡${accel.ratio === Infinity ? ' spike' : ' ' + accel.ratio.toFixed(1) + 'x'}`;
+      } catch (_) {
+        burnStr = '';
+      }
+      q.push(`• ${w} ${pct}${deltaStr(deltaFor(w))}${reset}${warnStr}${burnStr}`);
     }
     chunk2 = q.join('\n');
   }

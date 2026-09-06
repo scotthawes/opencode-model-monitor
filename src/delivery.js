@@ -825,7 +825,10 @@ async function alert(level, title, message, opts) {
     const key = 'reserved:' + opts.dedupKey;
     const now = Date.now();
     const prev = dedupStore.get(key);
-    if (prev != null && now - prev < dedupTtlMs) {
+    // v0.17 (#105): honor a per-alert TTL (e.g. hourly anomaly dedup) instead
+    // of always applying the module default (24h).
+    const ttl = opts && typeof opts.dedupTtlMs === 'number' ? opts.dedupTtlMs : dedupTtlMs;
+    if (prev != null && now - prev < ttl) {
       return { delivered: false }; // suppressed — same degradation already alerted within TTL
     }
     dedupStore.set(key, now);
@@ -1399,6 +1402,44 @@ function renderMarkdown(report) {
         `- ${win} projection: ~80% warn on ${warnDate}, ~95% crit on ${critDate}`
       );
     }
+  }
+  // v0.17 insight (#105): burn-rate block — pts/day per window, days-to-95 vs
+  // the known reset ("exhausts before reset?" flag), plus the acceleration
+  // alarm (last-24h rate vs prior-7d baseline, 2x). Best-effort, never throws.
+  lines.push('');
+  lines.push('**Burn rate**:');
+  lines.push('');
+  try {
+    const burnUsage = report.usage && report.usage.usage ? report.usage.usage : report.usage || {};
+    for (const win of ['rolling', 'weekly', 'monthly']) {
+      const wi = windowInfo(history, win, now);
+      if (!history.length || !wi) {
+        lines.push(`- ${win} burn: n/a`);
+        continue;
+      }
+      const w = burnUsage[win] || {};
+      const burn = changeMetric.burnRateInfo(wi, w.resetsAt, now);
+      const accel = changeMetric.accelerationAlarm(history, win, now);
+      if (!burn) {
+        const accelStr = accel ? ` · ⚡ accelerating (${accel.ratio === Infinity ? 'spike from flat' : accel.ratio.toFixed(1) + 'x baseline'})` : '';
+        lines.push(`- ${win} burn: stable (no increase detected)${accelStr}`);
+        continue;
+      }
+      const rateStr = `${burn.ratePerDay >= 10 ? Math.round(burn.ratePerDay * 10) / 10 : Math.round(burn.ratePerDay * 100) / 100} pts/day`;
+      const resetStr = w.resetsAt ? humanizeReset(w.resetsAt) : '?';
+      const exhaustStr =
+        burn.exhaustsBeforeReset == null
+          ? ''
+          : burn.exhaustsBeforeReset
+            ? ' · ⚠️ exhausts before reset'
+            : ' · resets before 95%';
+      const accelStr = accel ? ` · ⚡ accelerating (${accel.ratio === Infinity ? 'spike from flat' : accel.ratio.toFixed(1) + 'x baseline'})` : '';
+      lines.push(
+        `- ${win} burn: ${rateStr}, ~95% in ${Math.round(burn.daysToCrit)}d (${burn.critDateIso}, reset ${resetStr})${exhaustStr}${accelStr}`
+      );
+    }
+  } catch (_) {
+    lines.push('- burn: n/a');
   }
   lines.push('');
 
