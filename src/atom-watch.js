@@ -13,6 +13,11 @@ const delivery = require('./delivery');
 
 const MAX_SEEN = 25;
 
+// Per-request timeout (15s) so a hung feed can't stall the monitor cycle
+// indefinitely — mirrors the caps/catalog/liveness pattern. An abort surfaces
+// as a fetch rejection handled below (warning, never throw).
+const FETCH_TIMEOUT_MS = 15000;
+
 async function runAtomWatch(stateDir, key, feedUrl) {
   const etagPath = path.join(stateDir, '.etag-' + key);
   const storePath = path.join(stateDir, 'feed-' + key + '.json');
@@ -40,7 +45,8 @@ async function runAtomWatch(stateDir, key, feedUrl) {
   let res;
   try {
     res = await fetch(feedUrl, {
-      headers: reqEtag ? { 'If-None-Match': reqEtag } : {}
+      headers: reqEtag ? { 'If-None-Match': reqEtag } : {},
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
     });
   } catch (e) {
     delivery.alert('warning', 'Feed fetch failed: ' + key, String(e && e.message ? e.message : e), {

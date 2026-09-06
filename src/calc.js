@@ -39,6 +39,11 @@ const usageTable = require('./usage-table');
 
 const API_URL = 'https://models.opencode.ai/api.json';
 
+// Per-request timeout (15s) so a hung catalog endpoint can't stall the CLI
+// indefinitely — mirrors the caps/catalog/liveness pattern. fetchModelsMap is
+// read-only and returns {} on any failure (never throws).
+const FETCH_TIMEOUT_MS = 15000;
+
 // Default request token mix — documented estimate, override via --pattern.
 const DEFAULT_PATTERN = { input: 390, cachedRead: 32500, output: 120 };
 
@@ -198,7 +203,7 @@ function leaderboard(models, pattern, limit) {
 // Returns {} on any failure (caller decides how to surface). Never throws.
 async function fetchModelsMap() {
   try {
-    const res = await fetch(API_URL);
+    const res = await fetch(API_URL, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     if (!res.ok) return {};
     const data = await res.json();
     const modelsRaw = (data && data['opencode-go'] && data['opencode-go'].models) || {};

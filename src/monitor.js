@@ -176,6 +176,12 @@ async function main() {
       dedupTtlMs: 86400000,
       changelogRetentionMs: (config.changelogRetentionDays || 7) * 24 * 60 * 60 * 1000
     });
+    // v0.16.0 (#103): per-cycle efficiency — collect changelog entries in memory
+    // (single read-modify-write at flush) and reuse parsed state files via the
+    // mtime-validated cache so renderers don't re-parse from disk. Outputs are
+    // identical; only disk I/O is reduced.
+    delivery.beginCycleCache();
+    delivery.beginChangelogBatch();
     // Rotate alerts.log at the top of every cycle so a continuous run caps it
     // even if the process is never restarted.
     maybeRotateAlertsLog(stateDir);
@@ -320,6 +326,9 @@ async function main() {
       pins,
       feedUpdates
     };
+    // Flush the per-cycle changelog batch BEFORE rendering so report.md still
+    // sees this cycle's entries (single rewrite; zero on an unchanged cycle).
+    delivery.endChangelogBatch();
     delivery.writeReport(report);
     await delivery.alert('info', 'Monitor cycle complete', new Date().toISOString(), { debugOnly: true });
     return report;

@@ -12,7 +12,8 @@ const CHUNK_MAX = 1900;
 
 // 7-day retention window for "what changed" events (mirrors delivery's
 // changelogRetentionMs default so the digest matches the report's window).
-const CHANGELOG_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+// v0.16.0 (#103): single window constant lives in change-metric.js.
+const CHANGELOG_RETENTION_MS = changeMetric.QUOTA_WINDOW_MS;
 
 // Max bullets / events surfaced in the digest before we say "+N more".
 const MAX_EVENTS = 5;
@@ -62,10 +63,9 @@ function chunkText(text, max) {
 // --- presentation helpers --------------------------------------------------
 
 // Human date only (e.g. "Sep 8"), UTC so it never shifts across timezones.
+// v0.16.0 (#103): shared via change-metric.js so digest/report/page agree.
 function humanDate(iso) {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '?';
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  return changeMetric.humanDate(iso);
 }
 
 // Trim a number for chat: integers stay ints, floats drop trailing zeros.
@@ -137,14 +137,15 @@ function describeEvent(ev) {
 }
 
 // Read recent changelog events (7-day window), newest first. Returns an array
-// of {ts,level,title,message}.
+// of {ts,level,title,message}. v0.16.0 (#103): reads via delivery.readChangelog
+// so the per-cycle parse cache is reused instead of a third parse from disk.
 function getEvents(stateDir, now) {
   now = now || Date.now();
   const cutoff = now - CHANGELOG_RETENTION_MS;
   let arr = [];
   try {
-    const raw = fs.readFileSync(path.join(stateDir, 'changelog.json'), 'utf8');
-    const parsed = JSON.parse(raw);
+    if (stateDir) delivery.setStateDir(stateDir);
+    const parsed = delivery.readChangelog();
     if (Array.isArray(parsed)) {
       arr = parsed.filter((e) => (e.ts ? Date.parse(e.ts) : 0) >= cutoff);
     }
@@ -217,12 +218,10 @@ function deltaStr(delta) {
 function warnDateFor(history, win, now) {
   const wi = delivery.windowInfo(history, win, now);
   if (!history.length || !wi) return null;
-  const { current, delta, daysElapsed } = wi;
-  const rate = daysElapsed > 0 ? delta / daysElapsed : 0;
-  if (rate <= 0) return null;
-  if (current >= 80) return 'at/above warn';
-  const daysToWarn = (80 - current) / rate;
-  return humanDate(new Date(now + daysToWarn * 864e5).toISOString());
+  const proj = changeMetric.projectThresholds(wi, now);
+  if (!proj || proj.daysToWarn == null) return null;
+  if (proj.daysToWarn === 0) return 'at/above warn';
+  return humanDate(new Date(now + proj.daysToWarn * 864e5).toISOString());
 }
 
 // Project the ~95% critical date for a window (same linear model as warnDateFor,
@@ -230,12 +229,10 @@ function warnDateFor(history, win, now) {
 function critDateFor(history, win, now) {
   const wi = delivery.windowInfo(history, win, now);
   if (!history.length || !wi) return null;
-  const { current, delta, daysElapsed } = wi;
-  const rate = daysElapsed > 0 ? delta / daysElapsed : 0;
-  if (rate <= 0) return null;
-  if (current >= 95) return 'at/above crit';
-  const daysToCrit = (95 - current) / rate;
-  return humanDate(new Date(now + daysToCrit * 864e5).toISOString());
+  const proj = changeMetric.projectThresholds(wi, now);
+  if (!proj || proj.daysToCrit == null) return null;
+  if (proj.daysToCrit === 0) return 'at/above crit';
+  return humanDate(new Date(now + proj.daysToCrit * 864e5).toISOString());
 }
 
 // Build 1-3 Discord-safe chunks (each <=1900 chars) from the current report,

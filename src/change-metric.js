@@ -90,6 +90,61 @@ function directionColor(direction) {
   return '#95a5a6'; // grey — unchanged
 }
 
+// --- Shared quota-projection helpers (v0.16.0, #103) --------------------------
+//
+// warn-date math was copy-pasted across delivery.renderMarkdown (ISO dates),
+// discord-digest.warnDateFor/critDateFor (human dates) with the same linear
+// model: rate = delta/daysElapsed from the 7-day window, then
+// daysToThreshold = (threshold - current)/rate. This module owns the single
+// window constant + the pure projection core so every surface derives the same
+// dates/ranks. Formatting stays at the call site (ISO vs "Sep 8"), so rendered
+// output is byte-identical to before.
+
+// Single 7-day analysis window shared by quota-movement + projection math.
+// Intentionally hardcoded (not config) to match changelogRetentionDays default.
+const QUOTA_WINDOW_MS = 7 * 24 * 3600 * 1000;
+
+// Quota thresholds shared by all surfaces.
+const WARN_THRESHOLD = 80;
+const CRIT_THRESHOLD = 95;
+
+// Days from now until `current` (growing at `ratePerDay` pts/day) reaches
+// `threshold`. Returns null when the rate is not positive (stable/unknown),
+// 0 when already at/above the threshold. Pure, never throws.
+function daysToThreshold(current, ratePerDay, threshold) {
+  if (typeof current !== 'number' || typeof ratePerDay !== 'number') return null;
+  if (!Number.isFinite(current) || !Number.isFinite(ratePerDay)) return null;
+  if (ratePerDay <= 0) return null;
+  if (current >= threshold) return 0;
+  return (threshold - current) / ratePerDay;
+}
+
+// ISO date (YYYY-MM-DD) `days` from `nowMs`. Pure, never throws.
+function thresholdDateIso(nowMs, days) {
+  return new Date(nowMs + days * 864e5).toISOString().slice(0, 10);
+}
+
+// Human date only (e.g. "Sep 8"), UTC so it never shifts across timezones.
+// Same rendering the digest used inline; shared so report/digest/page agree.
+function humanDate(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '?';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+// Both warn + crit projections from one windowInfo-shaped input:
+//   { current, delta, daysElapsed } + nowMs
+// Returns null when unprojectable (no data / stable), otherwise
+//   { daysToWarn, daysToCrit } (0 = already at/above). Pure, never throws.
+function projectThresholds(wi, nowMs) {
+  if (!wi || typeof wi.current !== 'number' || typeof wi.delta !== 'number') return null;
+  const rate = wi.daysElapsed > 0 ? wi.delta / wi.daysElapsed : 0;
+  const daysToWarn = daysToThreshold(wi.current, rate, WARN_THRESHOLD);
+  const daysToCrit = daysToThreshold(wi.current, rate, CRIT_THRESHOLD);
+  if (daysToWarn == null && daysToCrit == null) return null;
+  return { daysToWarn, daysToCrit, rate };
+}
+
 module.exports = {
   changeParts,
   fmtPct,
@@ -99,5 +154,12 @@ module.exports = {
   fmtFeedPct,
   directionOf,
   directionColor,
-  trimNum
+  trimNum,
+  QUOTA_WINDOW_MS,
+  WARN_THRESHOLD,
+  CRIT_THRESHOLD,
+  daysToThreshold,
+  thresholdDateIso,
+  humanDate,
+  projectThresholds
 };
