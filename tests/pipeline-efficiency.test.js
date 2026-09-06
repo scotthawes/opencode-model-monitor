@@ -186,8 +186,12 @@ test('unified projection matches the report ISO dates', () => {
   try {
     delivery.beginCycleCache();
     const md = delivery.renderMarkdown(report);
-    const wi = delivery.windowInfo(history, 'monthly', NOW);
-    const proj = changeMetric.projectThresholds(wi, NOW);
+    // v0.19.0 (#110): projections are bounded by resetsAt (Oct 1 = 26d out).
+    // Warn (21d, Sep 26) lands before the reset; crit (31.5d unbounded) caps
+    // at the reset horizon.
+    const wi = delivery.windowInfo(history, 'monthly', NOW, '2026-10-01T00:00:00.000Z');
+    const proj = changeMetric.projectThresholds(wi, NOW, '2026-10-01T00:00:00.000Z');
+    assert.ok(proj && proj.bounded === true, 'crit must be reset-bounded');
     const warnIso = changeMetric.thresholdDateIso(NOW, proj.daysToWarn);
     const critIso = changeMetric.thresholdDateIso(NOW, proj.daysToCrit);
     assert.ok(

@@ -15,6 +15,22 @@ function trimNum(n) {
   return String(parseFloat(Number(n).toPrecision(6)));
 }
 
+// --- Number-formatting rule (v0.19.0, #110) ----------------------------------
+// One helper, one rule, every surface:
+//   money  -> fmtMoney(v): '—' when missing, else '$' + trimNum(v)
+//   factor -> trimNum(mult) + 'x' (no unrounded float artifacts)
+// delivery.fmtModelCost, history-view fmtMoneyCell, discord-digest fmtNum and
+// calc.fmtUsd all delegate here (or are documented equivalents) so the same
+// value can never differ per surface. Dust is never hidden: tiny non-zero
+// values render in full trimNum precision, never rounded to 0.
+// Money cell: '—' when missing, else '$' + trimNum (e.g. '$0.5075').
+function fmtMoney(v) {
+  if (v == null) return '—';
+  const n = Number(v);
+  if (!isFinite(n)) return '—';
+  return '$' + trimNum(n);
+}
+
 // Compute raw change components between two numeric values.
 // Returns null when either side is not a finite number (no comparison possible).
 // When old is exactly 0 we cannot form a ratio: we mark the move as "new" when
@@ -23,6 +39,10 @@ function changeParts(oldV, newV) {
   if (typeof oldV !== 'number' || typeof newV !== 'number') return null;
   if (!Number.isFinite(oldV) || !Number.isFinite(newV)) return null;
   if (oldV === 0) {
+    // v0.19.0 (#110): 0→0 is "no change", not "new" — render 0% / 1x / $0.
+    if (newV === 0) {
+      return { old: oldV, new: newV, pct: 0, mult: 1, abs: 0, isNew: false, direction: 'flat' };
+    }
     const direction = newV > 0 ? 'up' : newV < 0 ? 'down' : 'flat';
     return { old: oldV, new: newV, pct: null, mult: null, abs: newV - oldV, isNew: newV !== 0, direction };
   }
@@ -133,16 +153,38 @@ function humanDate(iso) {
 }
 
 // Both warn + crit projections from one windowInfo-shaped input:
-//   { current, delta, daysElapsed } + nowMs
+//   { current, delta, daysElapsed } + nowMs + optional resetsAtIso
 // Returns null when unprojectable (no data / stable), otherwise
 //   { daysToWarn, daysToCrit } (0 = already at/above). Pure, never throws.
-function projectThresholds(wi, nowMs) {
+// v0.19.0 (#110): projections are BOUNDED by the known reset — a linear
+// crossing that lands after resetsAt is capped at the reset horizon (with
+// bounded:true) instead of promising a date in the next quota cycle, which
+// the reset would invalidate.
+function projectThresholds(wi, nowMs, resetsAtIso) {
   if (!wi || typeof wi.current !== 'number' || typeof wi.delta !== 'number') return null;
   const rate = wi.daysElapsed > 0 ? wi.delta / wi.daysElapsed : 0;
-  const daysToWarn = daysToThreshold(wi.current, rate, WARN_THRESHOLD);
-  const daysToCrit = daysToThreshold(wi.current, rate, CRIT_THRESHOLD);
+  let daysToWarn = daysToThreshold(wi.current, rate, WARN_THRESHOLD);
+  let daysToCrit = daysToThreshold(wi.current, rate, CRIT_THRESHOLD);
   if (daysToWarn == null && daysToCrit == null) return null;
-  return { daysToWarn, daysToCrit, rate };
+  let bounded = false;
+  try {
+    const resetMs = resetsAtIso != null ? Date.parse(resetsAtIso) : NaN;
+    const now = nowMs != null ? nowMs : Date.now();
+    if (!isNaN(resetMs) && resetMs > now) {
+      const horizonDays = (resetMs - now) / 864e5;
+      if (daysToWarn != null && daysToWarn > horizonDays) {
+        daysToWarn = horizonDays;
+        bounded = true;
+      }
+      if (daysToCrit != null && daysToCrit > horizonDays) {
+        daysToCrit = horizonDays;
+        bounded = true;
+      }
+    }
+  } catch (_) {
+    // best effort — unparseable resetsAt leaves projections unbounded
+  }
+  return { daysToWarn, daysToCrit, rate, bounded };
 }
 
 // --- v0.17 insight helpers (#105) ------------------------------------------------
@@ -400,6 +442,7 @@ module.exports = {
   directionOf,
   directionColor,
   trimNum,
+  fmtMoney,
   QUOTA_WINDOW_MS,
   WARN_THRESHOLD,
   CRIT_THRESHOLD,

@@ -75,6 +75,26 @@ test('leaderboard limit caps output', () => {
   }
 });
 
+test('leaderboard tie-break is deterministic (effective tie -> id order)', () => {
+  // Identical costs => identical effective => insertion order must NOT decide.
+  const COST = { input: 1.0, output: 2.0, cache_read: 0.2, cache_write: 1.2 };
+  usageTable.setTable(null);
+  try {
+    const fwd = calc.leaderboard(
+      { 'b-model': { cost: COST }, 'a-model': { cost: COST }, 'c-model': { cost: COST } },
+      calc.DEFAULT_PATTERN
+    ).map((r) => r.id);
+    const rev = calc.leaderboard(
+      { 'c-model': { cost: COST }, 'a-model': { cost: COST }, 'b-model': { cost: COST } },
+      calc.DEFAULT_PATTERN
+    ).map((r) => r.id);
+    assert.deepStrictEqual(fwd, ['a-model', 'b-model', 'c-model'], 'ties break by id: ' + fwd);
+    assert.deepStrictEqual(rev, ['a-model', 'b-model', 'c-model'], 'order stable regardless of insertion: ' + rev);
+  } finally {
+    usageTable.setTable(null);
+  }
+});
+
 test('parseArgs recognizes --leaderboard', () => {
   const a = calc.parseArgs(['--leaderboard']);
   assert.strictEqual(a.leaderboard, true);

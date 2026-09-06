@@ -18,7 +18,7 @@ function historyFrom(pairs) {
   }));
 }
 
-test('buildPricingData computes 7-day delta (Δ% / × / $) per model', () => {
+test('buildPricingData computes windowed delta (Δ% / × / $) per model', () => {
   const now = Date.parse('2026-09-08T00:00:00.000Z');
   const hist = historyFrom([
     { ts: '2026-09-01T00:00:00.000Z', id: 'hy3', output: 0.0725, input: 0.14 },
@@ -27,12 +27,27 @@ test('buildPricingData computes 7-day delta (Δ% / × / $) per model', () => {
   const data = buildPricingData(hist, { hy3: { meta: { name: 'Hy3' } } }, { now });
   const m = data.models.find((x) => x.id === 'hy3');
   assert.ok(m, 'hy3 present');
-  assert.strictEqual(m.delta7d.direction, 'up');
-  assert.ok(Math.abs(m.delta7d.output.pct - 700) < 1, 'output +700%');
-  assert.ok(Math.abs(m.delta7d.output.mult - 8) < 1e-9, 'output 8x');
-  assert.ok(Math.abs(m.delta7d.output.abs - 0.5075) < 1e-9, 'output +$0.5075');
+  // v0.19.0 (#110): deltaWindow is canonical (page window = 30d); delta7d is a
+  // deprecated alias carrying the same object.
+  assert.strictEqual(m.deltaWindow.direction, 'up');
+  assert.strictEqual(m.delta7d, m.deltaWindow, 'alias must be the same block');
+  assert.ok(Math.abs(m.deltaWindow.output.pct - 700) < 1, 'output +700%');
+  assert.ok(Math.abs(m.deltaWindow.output.mult - 8) < 1e-9, 'output 8x');
+  assert.ok(Math.abs(m.deltaWindow.output.abs - 0.5075) < 1e-9, 'output +$0.5075');
   // input unchanged -> flat
-  assert.strictEqual(m.delta7d.input.direction, 'flat');
+  assert.strictEqual(m.deltaWindow.input.direction, 'flat');
+});
+
+test('window labels match the math (30d page window, not 7d)', () => {
+  const now = Date.parse('2026-09-08T00:00:00.000Z');
+  const hist = historyFrom([{ ts: '2026-09-08T00:00:00.000Z', id: 'hy3', output: 0.58 }]);
+  const data = buildPricingData(hist, { hy3: { meta: { name: 'Hy3' } } }, { now });
+  assert.strictEqual(data.windowDays, 30, 'page math uses the 30d window');
+  const html = generatePublicPage(hist, { pricing: { hy3: { meta: { name: 'Hy3' } } }, now });
+  assert.ok(html.includes('30-day window'), 'sub header names the 30d window');
+  assert.ok(html.includes('Model table — 30-day price change'), 'table header names 30d');
+  assert.ok(html.includes('Δ30d output'), 'delta columns name 30d');
+  assert.ok(!html.includes('Δ7d'), 'no stale 7d delta label on the page');
 });
 
 test('a price decrease is marked down (green) and an increase up (red)', () => {
@@ -43,7 +58,7 @@ test('a price decrease is marked down (green) and an increase up (red)', () => {
   ]);
   const data = buildPricingData(hist, { cheap: { meta: { name: 'Cheap' } } }, { now });
   const m = data.models.find((x) => x.id === 'cheap');
-  assert.strictEqual(m.delta7d.direction, 'down');
+  assert.strictEqual(m.deltaWindow.direction, 'down');
 
   const html = generatePublicPage(hist, { pricing: { cheap: { meta: { name: 'Cheap' } } }, now });
   // Row carries the direction class so the page can color it.
@@ -179,5 +194,37 @@ test('graph canvas height attribute is capped (<=400) and wrapped to cap height'
   assert.ok(m, 'canvas height attribute present');
   assert.ok(Number(m[1]) <= 400, 'canvas height <= 400, got ' + m[1]);
   assert.ok(html.includes('class="graph-wrap"'), 'graph wrapper present to cap height');
+});
+
+test('topMovers rank by % move (cheap-model shocks beat big-ticket drift)', () => {
+  const now = Date.parse('2026-09-08T00:00:00.000Z');
+  const hist = [
+    { ts: '2026-09-01T00:00:00.000Z', models: { whale: { cost: { output: 100, input: 10 }, tiers: null }, guppy: { cost: { output: 0.1, input: 0.05 }, tiers: null } } },
+    { ts: '2026-09-08T00:00:00.000Z', models: { whale: { cost: { output: 110, input: 10 }, tiers: null }, guppy: { cost: { output: 0.8, input: 0.05 }, tiers: null } } }
+  ];
+  // whale moved +$10 (+10%); guppy moved +$0.70 (+700%). Old abs-$ ranking put
+  // whale first; %-ranking must put guppy first.
+  const data = buildPricingData(hist, {}, { now });
+  assert.strictEqual(data.topMovers[0], 'guppy', 'top mover must be the %-shock, got ' + data.topMovers[0]);
+});
+
+test('topMovers include input-only moves (output flat, input moved)', () => {
+  const now = Date.parse('2026-09-08T00:00:00.000Z');
+  const hist = [
+    { ts: '2026-09-01T00:00:00.000Z', models: { inmover: { cost: { output: 1.0, input: 0.1 }, tiers: null }, flat: { cost: { output: 1.0, input: 0.1 }, tiers: null } } },
+    { ts: '2026-09-08T00:00:00.000Z', models: { inmover: { cost: { output: 1.0, input: 0.8 }, tiers: null }, flat: { cost: { output: 1.0, input: 0.1 }, tiers: null } } }
+  ];
+  // inmover: output flat, input +700%. Old output-only ranking scored it 0.
+  const data = buildPricingData(hist, {}, { now });
+  assert.strictEqual(data.topMovers[0], 'inmover', 'input-only move must rank first, got ' + data.topMovers[0]);
+});
+
+test('$100 cap badge has a distinct color; unknown caps carry a ? marker', () => {
+  const hv = require('../src/history-view');
+  assert.notStrictEqual(hv.capBadgeColor(100), hv.capBadgeColor(60), '$100 must differ from $60 green');
+  assert.strictEqual(hv.capBadgeColor(100), '#2980b9');
+  assert.ok(hv.fmtCapBadge(60, true).includes('$60') && !hv.fmtCapBadge(60, true).includes('?'), 'known cap: no marker');
+  assert.ok(hv.fmtCapBadge(60, false).includes('$60?'), 'unknown cap: ? marker');
+  assert.strictEqual(hv.fmtCapBadge(null), '—');
 });
 

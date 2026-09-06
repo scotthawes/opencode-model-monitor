@@ -81,3 +81,44 @@ test('projection needs a usable current value (returns null when empty)', () => 
   assert.strictEqual(discordDigest.warnDateFor([{ ts: NOW, monthly: null }], 'monthly', NOW), null);
   assert.strictEqual(discordDigest.critDateFor([], 'monthly', NOW), null);
 });
+
+test('windowInfo splits the series at a reset drop (post-reset climb reads from the floor)', () => {
+  // Previous cycle peaked at 85, then a reset dropped to 5; the new cycle
+  // climbed to 15. Without the split the delta would read 15-85 = -70 (a
+  // phantom improvement); with it, 15-5 = +10 (the real post-reset climb).
+  const hist = [
+    { ts: NOW - 6 * DAY, monthly: 80 },
+    { ts: NOW - 5 * DAY, monthly: 85 },
+    { ts: NOW - 4 * DAY, monthly: 5 }, // reset drop (-80)
+    { ts: NOW - 2 * DAY, monthly: 10 },
+    { ts: NOW, monthly: 15 }
+  ];
+  const wi = delivery.windowInfo(hist, 'monthly', NOW);
+  assert.strictEqual(wi.oldest, 5, 'oldest must be the post-reset floor, got ' + wi.oldest);
+  assert.strictEqual(wi.delta, 10, 'delta must be the post-reset climb, got ' + wi.delta);
+});
+
+test('windowInfo ignores small dips (no false reset split)', () => {
+  const hist = [
+    { ts: NOW - 6 * DAY, monthly: 40 },
+    { ts: NOW - 3 * DAY, monthly: 38 }, // -2: noise, not a reset
+    { ts: NOW, monthly: 50 }
+  ];
+  const wi = delivery.windowInfo(hist, 'monthly', NOW);
+  assert.strictEqual(wi.oldest, 40);
+  assert.strictEqual(wi.delta, 10);
+});
+
+test('warn/crit projections are bounded by resetsAt', () => {
+  // 40 -> 50 over 7d => warn in 21d, crit in 31.5d unbounded; a reset in 10d
+  // caps both at the horizon.
+  const hist = historyFor(40, 50);
+  const resetIso = new Date(NOW + 10 * DAY).toISOString();
+  const warnIso = new Date(NOW + 10 * DAY).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC'
+  });
+  assert.strictEqual(discordDigest.warnDateFor(hist, 'monthly', NOW, resetIso), warnIso);
+  assert.strictEqual(discordDigest.critDateFor(hist, 'monthly', NOW, resetIso), warnIso);
+});
