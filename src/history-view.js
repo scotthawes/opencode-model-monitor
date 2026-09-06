@@ -279,7 +279,7 @@ function main() {
 }
 
 // Export for tests; run CLI only when executed directly.
-module.exports = { generateHistoryHtml, sparkline, esc, metricFor, buildPricingData, generatePublicPage, parseChangelogFeedLine };
+module.exports = { generateHistoryHtml, sparkline, esc, metricFor, buildPricingData, generatePublicPage, parseChangelogFeedLine, capBadgeColor, fmtCapBadge };
 
 // ===========================================================================
 // Public Pages redesign (Closes #75): price graph + summarized feed + change
@@ -305,6 +305,7 @@ function usageTableCap(id) {
 // hy3 8× change on 2026-08-30, reconstructed by scripts/backfill-history.js —
 // remain visible inside the window (Closes #81).
 const PAGE_WINDOW_DAYS = 30;
+module.exports.PAGE_WINDOW_DAYS = PAGE_WINDOW_DAYS;
 
 function numOrNull(v) {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
@@ -441,7 +442,7 @@ function buildPricingData(history, pricingMap, opts) {
       if (k) dayMap[k] = true;
     }
     const latest = series[series.length - 1];
-    // Reference sample ~7d ago = earliest sample still inside the window.
+    // Reference sample ~window ago = earliest sample still inside the window.
     let ref = series[0];
     for (const p of series) {
       if (now - p.t <= WIN) {
@@ -462,16 +463,22 @@ function buildPricingData(history, pricingMap, opts) {
     // usage-table.json — published pricing, never personal usage %). Drives the
     // cap badge on the model table + the leaderboard.
     const cap = usageTableCap(id);
+    // v0.19.0 (#110): deltaWindow is the canonical windowed delta (the page
+    // window is 30d — see PAGE_WINDOW_DAYS). delta7d is kept as a deprecated
+    // alias so old clients/tests keep working; new code reads deltaWindow.
+    const deltaBlock = {
+      output: deltaToObj(deltaOut),
+      input: deltaToObj(deltaIn),
+      direction
+    };
     models.push({
       id,
       name: nameOf(id),
       cap,
+      capKnown: usageTable.hasCap(id),
       current: cur,
-      delta7d: {
-        output: deltaToObj(deltaOut),
-        input: deltaToObj(deltaIn),
-        direction
-      },
+      deltaWindow: deltaBlock,
+      delta7d: deltaBlock,
       series: graphSeries
     });
   }
@@ -513,6 +520,7 @@ function buildPricingData(history, pricingMap, opts) {
       id: r.id,
       name: nameOf(r.id),
       cap: r.cap,
+      capKnown: usageTable.hasCap(r.id),
       multiplier: r.multiplier,
       effective: r.effective,
       requestsPerMo: r.requestsPerMo
@@ -543,7 +551,7 @@ function buildPricingData(history, pricingMap, opts) {
     const rawOrder = Object.keys(lbModels)
       .map((id) => ({ id, raw: calc.costPerRequest(lbModels[id].cost) }))
       .filter((r) => r.raw != null && isFinite(r.raw) && r.raw > 0)
-      .sort((a, b) => a.raw - b.raw)
+      .sort((a, b) => (a.raw - b.raw) || a.id.localeCompare(b.id))
       .map((r) => r.id);
     const capOf = {};
     for (const m of models) capOf[m.id] = m.cap;
@@ -562,10 +570,31 @@ function buildPricingData(history, pricingMap, opts) {
     }
   }
 
-  // Top-10 movers by absolute output $/1M delta (fallback to input magnitude).
+  // Top-10 movers by PERCENT output move (v0.19.0, #110 — was absolute $,
+  // which hid cheap-model % shocks), blending absolute $ to break %-ties, and
+  // falling back to the input delta so input-only moves are visible too.
+  function moverScore(m) {
+    const d = m.deltaWindow || m.delta7d || {};
+    const mag = (o) => {
+      if (!o || o.old == null || o.new == null) return null;
+      if (typeof o.pct !== 'number' || !isFinite(o.pct)) return null;
+      return { pct: Math.abs(o.pct), abs: Math.abs(o.abs || 0) };
+    };
+    // Best metric wins: a flat output must not shadow a real input move.
+    const cands = [mag(d.output), mag(d.input)].filter(Boolean);
+    if (!cands.length) return { pct: 0, abs: 0 };
+    cands.sort((a, b) => (b.pct - a.pct) || (b.abs - a.abs));
+    return cands[0];
+  }
   const topMovers = models
     .slice()
-    .sort((a, b) => Math.abs(b.delta7d.output.abs || 0) - Math.abs(a.delta7d.output.abs || 0))
+    .sort((a, b) => {
+      const sa = moverScore(a);
+      const sb = moverScore(b);
+      if (sb.pct !== sa.pct) return sb.pct - sa.pct;
+      if (sb.abs !== sa.abs) return sb.abs - sa.abs;
+      return a.id.localeCompare(b.id);
+    })
     .slice(0, 10)
     .map((m) => m.id);
 
@@ -634,9 +663,10 @@ function buildPricingData(history, pricingMap, opts) {
   };
 }
 
-// Format a signed money value for the table (e.g. "$0.5800" / "—").
+// Format a signed money value for the table via the shared helper (v0.19.0,
+// #110: single number-formatting rule — change-metric.fmtMoney).
 function fmtMoneyCell(v) {
-  return v == null ? '—' : '$' + changeMetric.trimNum(v);
+  return changeMetric.fmtMoney(v);
 }
 
 // Format a delta cell: "▲ +700% (8x, +$0.5075)" / "—" when no data.
@@ -649,17 +679,24 @@ function fmtDeltaCell(d) {
 
 // Color for a usage-cap tier badge: higher cap = cheaper effective cost (green);
 // lower cap ($15/$30) = more expensive (amber/red). Pure, public pricing only.
+// Color for a usage-cap tier badge: higher cap = cheaper effective cost (green);
+// lower cap ($15/$30) = more expensive (amber/red). v0.19.0 (#110): the $100
+// tier (0.6x — cheaper than $60) gets its own blue so it never reads as $60.
 function capBadgeColor(cap) {
   if (cap == null) return '#95a5a6';
+  if (cap >= 100) return '#2980b9'; // blue — $100 tier (0.6x, cheapest)
   if (cap >= 60) return '#27ae60'; // green — effectively cheaper (≤1x)
   if (cap >= 30) return '#e67e22'; // amber — 2x
   return '#c0392b'; // red — 4x (more expensive)
 }
 
-// Format a cap badge cell: "$15" colored by tier.
-function fmtCapBadge(cap) {
+// Format a cap badge cell: "$15" colored by tier. v0.19.0 (#110): an unknown
+// (defaulted, unpublished) cap carries a "?" marker so it is never mistaken
+// for published pricing. Pass `known=false` (usageTable.hasCap) to mark it.
+function fmtCapBadge(cap, known) {
   if (cap == null) return '—';
-  return `<span class="cap-badge" style="color:${capBadgeColor(cap)};font-weight:600">$${cap}</span>`;
+  const marker = known === false ? '?' : '';
+  return `<span class="cap-badge" style="color:${capBadgeColor(cap)};font-weight:600">$${cap}${marker}</span>`;
 }
 
 // Server-render the model table rows (escaped) with per-row direction color + the
@@ -670,19 +707,20 @@ function renderPublicModelRows(data) {
   if (models.length === 0) {
     return '<tr><td colspan="6" class="muted">No models recorded in history.</td></tr>';
   }
-  // Sort by id for a stable table; color reflects the 7d price direction.
+  // Sort by id for a stable table; color reflects the window price direction.
   const sorted = models.slice().sort((a, b) => a.id.localeCompare(b.id));
   const rows = sorted.map((m) => {
-    const dir = m.delta7d && m.delta7d.direction ? m.delta7d.direction : 'flat';
+    const dw = m.deltaWindow || m.delta7d || {};
+    const dir = dw.direction || 'flat';
     const color = changeMetric.directionColor(dir);
     return (
       `<tr class="dir-${esc(dir)}">` +
       `<td class="model"><code>${esc(m.name || m.id)}</code></td>` +
-      `<td class="mono">${fmtCapBadge(m.cap)}</td>` +
+      `<td class="mono">${fmtCapBadge(m.cap, m.capKnown)}</td>` +
       `<td class="mono">${fmtMoneyCell(m.current && m.current.output)}</td>` +
       `<td class="mono">${fmtMoneyCell(m.current && m.current.input)}</td>` +
-      `<td class="mono" style="color:${color};font-weight:600">${fmtDeltaCell(m.delta7d && m.delta7d.output)}</td>` +
-      `<td class="mono" style="color:${color}">${fmtDeltaCell(m.delta7d && m.delta7d.input)}</td>` +
+      `<td class="mono" style="color:${color};font-weight:600">${fmtDeltaCell(dw.output)}</td>` +
+      `<td class="mono" style="color:${color}">${fmtDeltaCell(dw.input)}</td>` +
       `</tr>`
     );
   });
@@ -712,7 +750,7 @@ function renderPublicLeaderboardTable(data) {
         `<td class="rank">${i + 1}</td>` +
         `<td class="model"><code>${esc(r.name || r.id)}</code></td>` +
         `<td class="num mono" style="color:${effColor};font-weight:600">${esc(eff)}/req</td>` +
-        `<td>${fmtCapBadge(r.cap)}</td>` +
+        `<td>${fmtCapBadge(r.cap, r.capKnown)}</td>` +
         `<td class="num mono">${esc(rpm)}</td>` +
         `<td class="mono">${esc(arrow)}${esc(upset)}</td>` +
         `</tr>`
@@ -745,7 +783,7 @@ function renderPublicLeaderboard(data) {
         `<span class="rank">${i + 1}.</span> ` +
         `<code>${esc(r.name || r.id)}</code> ` +
         `<span class="mono" style="color:${effColor};font-weight:600">${eff}/req</span> ` +
-        `<span class="mono">cap ${fmtCapBadge(r.cap)}</span> ` +
+        `<span class="mono">cap ${fmtCapBadge(r.cap, r.capKnown)}</span> ` +
         `<span class="muted">· ${r.multiplier}x · ${rpm} req/mo</span>` +
         `</li>`
       );
@@ -858,19 +896,19 @@ ${leaderboardTable}
     <input id="search" type="search" placeholder="Filter / add a model…" aria-label="Filter models">
   </div>
   <p class="legend">
-    <span class="sw" style="background:#c0392b"></span>increased (7d)
-    <span class="sw" style="background:#27ae60"></span>decreased (7d)
-    <span class="sw" style="background:#95a5a6"></span>unchanged (7d)
+    <span class="sw" style="background:#c0392b"></span>increased (${data.windowDays}d)
+    <span class="sw" style="background:#27ae60"></span>decreased (${data.windowDays}d)
+    <span class="sw" style="background:#95a5a6"></span>unchanged (${data.windowDays}d)
   </p>
   <p class="note">Usage color is N/A on this public page (no per-model usage is published) — coloring reflects price change only. Default shows the top-10 movers; type a model id/name above to add any of the ${data.models.length} tracked models to the graph. X axis is daily ("Sep 5"); samples are aggregated to one point per day.</p>
   <div class="graph-wrap"><canvas id="priceGraph" height="320" aria-label="Model output price over time"></canvas></div>
 </section>
 
 <section id="compare">
-  <h2>Model table — 7-day price change</h2>
+  <h2>Model table — ${data.windowDays}-day price change</h2>
   <table>
     <thead>
-      <tr><th>Model</th><th>Cap</th><th>Output $/1M</th><th>Input $/1M</th><th>Δ7d output</th><th>Δ7d input</th></tr>
+      <tr><th>Model</th><th>Cap</th><th>Output $/1M</th><th>Input $/1M</th><th>Δ${data.windowDays}d output</th><th>Δ${data.windowDays}d input</th></tr>
     </thead>
     <tbody>
 ${modelRows}
@@ -910,11 +948,12 @@ ${feedItems}
   var chart = null;
   function buildChart(metric) {
     var datasets = data.models.map(function (m) {
+      var dw = m.deltaWindow || m.delta7d || {};
       return {
         label: m.name || m.id,
         data: labels.map(function (_, i) { return valAt(m, i, metric); }),
-        borderColor: dirColor(m.delta7d.direction),
-        backgroundColor: dirColor(m.delta7d.direction),
+        borderColor: dirColor(dw.direction),
+        backgroundColor: dirColor(dw.direction),
         hidden: data.topMovers.indexOf(m.id) === -1,
         spanGaps: true,
         pointRadius: 2,

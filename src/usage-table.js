@@ -83,6 +83,19 @@ function getUsageCap(modelId, log) {
   return DEFAULT_CAP;
 }
 
+// True when the model has an explicit, valid cap entry in the table (vs the
+// silent $60 default). v0.19.0 (#110): drives the unknown-cap "?" badge marker
+// so a defaulted cap is never mistaken for published pricing. Never throws.
+function hasCap(modelId) {
+  try {
+    const t = loadTable();
+    if (modelId == null || !Object.prototype.hasOwnProperty.call(t, modelId)) return false;
+    const v = Number(t[modelId]);
+    return isFinite(v) && v > 0;
+  } catch (_) {
+    return false;
+  }
+}
 // Effective multiplier (MONTHLY_CREDIT / cap) for a model id. Returns null only
 // when the cap is non-positive/non-finite (defensive); normally a finite number.
 function effectiveMultiplier(modelId, log) {
@@ -204,6 +217,7 @@ module.exports = {
   silentLog,
   multiplierForCap,
   getUsageCap,
+  hasCap,
   effectiveMultiplier,
   effectiveCost,
   loadTable,

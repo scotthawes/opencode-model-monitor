@@ -71,6 +71,9 @@ function humanDate(iso) {
 }
 
 // Trim a number for chat: integers stay ints, floats drop trailing zeros.
+// Per-surface rule (v0.19.0, #110): money on every surface renders via
+// change-metric trimNum/fmtMoney; this helper is for NON-money chat deltas
+// (quota points) only, so its 4-decimal shape is intentional, not drift.
 function fmtNum(x) {
   if (x == null || isNaN(x)) return '?';
   if (Number.isInteger(x)) return String(x);
@@ -217,10 +220,12 @@ function deltaStr(delta) {
 }
 
 // Project the ~80% warn date for a window, or null when stable/unknown.
-function warnDateFor(history, win, now) {
-  const wi = delivery.windowInfo(history, win, now);
+// v0.19.0 (#110): accepts the window's resetsAt so the linear projection is
+// bounded by the reset (see change-metric.projectThresholds).
+function warnDateFor(history, win, now, resetsAtIso) {
+  const wi = delivery.windowInfo(history, win, now, resetsAtIso);
   if (!history.length || !wi) return null;
-  const proj = changeMetric.projectThresholds(wi, now);
+  const proj = changeMetric.projectThresholds(wi, now, resetsAtIso);
   if (!proj || proj.daysToWarn == null) return null;
   if (proj.daysToWarn === 0) return 'at/above warn';
   return humanDate(new Date(now + proj.daysToWarn * 864e5).toISOString());
@@ -228,10 +233,10 @@ function warnDateFor(history, win, now) {
 
 // Project the ~95% critical date for a window (same linear model as warnDateFor,
 // threshold 95). Returns 'at/above crit' when already at/above, null when stable.
-function critDateFor(history, win, now) {
-  const wi = delivery.windowInfo(history, win, now);
+function critDateFor(history, win, now, resetsAtIso) {
+  const wi = delivery.windowInfo(history, win, now, resetsAtIso);
   if (!history.length || !wi) return null;
-  const proj = changeMetric.projectThresholds(wi, now);
+  const proj = changeMetric.projectThresholds(wi, now, resetsAtIso);
   if (!proj || proj.daysToCrit == null) return null;
   if (proj.daysToCrit === 0) return 'at/above crit';
   return humanDate(new Date(now + proj.daysToCrit * 864e5).toISOString());
@@ -271,7 +276,7 @@ function buildDigestChunks(report, opts) {
     history = [];
   }
   const deltaFor = (w) => {
-    const wi = delivery.windowInfo(history, w, now);
+    const wi = delivery.windowInfo(history, w, now, usageWin[w] && usageWin[w].resetsAt);
     return wi && wi.delta != null ? wi.delta : null;
   };
 
@@ -422,11 +427,11 @@ function buildDigestChunks(report, opts) {
       const pct = wi.percent != null ? wi.percent + '%' : '?';
       const reset = wi.resetsAt ? ` → resets ${humanDate(wi.resetsAt)}` : '';
       // Warn projection only for the headline window (see note above).
-      const warn = w === headlineWin ? warnDateFor(history, w, now) : null;
+      const warn = w === headlineWin ? warnDateFor(history, w, now, wi.resetsAt) : null;
       const warnStr = warn && warn !== 'at/above warn' ? ` · warn ~${warn}` : '';
       let burnStr = '';
       try {
-        const info = delivery.windowInfo(history, w, now);
+        const info = delivery.windowInfo(history, w, now, wi.resetsAt);
         const burn = info ? changeMetric.burnRateInfo(info, wi.resetsAt, now) : null;
         if (burn) {
           const rate = burn.ratePerDay >= 10 ? Math.round(burn.ratePerDay * 10) / 10 : Math.round(burn.ratePerDay * 100) / 100;
@@ -445,7 +450,8 @@ function buildDigestChunks(report, opts) {
 
   // --- chunk 3: upcoming / actions (only the headline window) ---
   let chunk3 = '';
-  const warn = warnDateFor(history, headlineWin, now);
+  const headlineResetsAt = headline && headline.resetsAt ? headline.resetsAt : null;
+  const warn = warnDateFor(history, headlineWin, now, headlineResetsAt);
   const actions = [];
   if (warn === 'at/above warn') actions.push(`• ${headlineWin} already at/above warn threshold`);
   else if (warn) actions.push(`• ${headlineWin} warn projected ${warn} — consider throttle`);

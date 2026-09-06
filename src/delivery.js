@@ -1036,12 +1036,24 @@ function readChangelog() {
   return cachedJsonArray('changelog.json');
 }
 
+// A quota reset shows up as a sharp drop between consecutive samples (usage
+// falls back toward 0 in the new cycle). Pre-drop samples belong to the PREVIOUS
+// cycle, so a post-reset climb must not be diluted by them. Any consecutive
+// fall of at least this many points marks a reset boundary.
+const RESET_DROP_PTS = 20;
+
 // Compute 7-day quota movement for a single window from the time-series.
 // Picks the oldest sample still inside the 7-day window (falling back to the
 // oldest sample overall when none is within the window / has a value). Returns
 // { current, oldest, delta, oldestTs, daysElapsed } or null when the window has
 // no usable current value.
-function windowInfo(history, win, now) {
+// v0.19.0 (#110): RESET-AWARE — when the span contains a reset drop (a sharp
+// consecutive-sample fall >= RESET_DROP_PTS), the window starts at the first
+// sample AFTER the last such drop, so a post-reset climb reads from the reset
+// floor instead of the previous cycle's peak. `resetsAtIso` (optional) is
+// accepted for callers that know the next reset; the drop-split needs no clock
+// beyond the series itself, so it is currently informational only.
+function windowInfo(history, win, now, resetsAtIso) {
   now = now || Date.now();
   if (!history.length) return null;
   const latest = history[history.length - 1];
@@ -1073,6 +1085,23 @@ function windowInfo(history, win, now) {
     }
   }
   if (oldestSample == null || oldestTs == null) return null;
+
+  // Reset split: walk the oldestTs..now span in time order; the window restarts
+  // after the LAST sharp consecutive-sample drop (the reset boundary).
+  try {
+    const span = history
+      .filter((s) => s && typeof s.ts === 'number' && typeof s[win] === 'number' && s.ts >= oldestTs && s.ts <= now)
+      .sort((a, b) => a.ts - b.ts);
+    for (let i = 1; i < span.length; i++) {
+      if (span[i][win] - span[i - 1][win] <= -RESET_DROP_PTS) {
+        oldestSample = span[i][win];
+        oldestTs = span[i].ts;
+      }
+    }
+  } catch (_) {
+    // best effort — fall back to the pre-split oldest
+  }
+  void resetsAtIso; // accepted for API symmetry with projections; split is series-driven
 
   const daysElapsed = (now - oldestTs) / 864e5;
   return { current, oldest: oldestSample, delta: current - oldestSample, oldestTs, daysElapsed };
@@ -1124,7 +1153,7 @@ function reportSummary(report) {
     const history = readUsageHistory();
     const now = Date.now();
     for (const w of wins) {
-      const wi = windowInfo(history, w, now);
+      const wi = windowInfo(history, w, now, usageWin[w] && usageWin[w].resetsAt);
       if (wi && wi.delta != null && wi.delta > 0 && wi.current < 80) {
         const rate = wi.daysElapsed > 0 ? wi.delta / wi.daysElapsed : 0;
         if (rate > 0) {
@@ -1276,7 +1305,7 @@ function renderMarkdown(report) {
       if (!w) continue;
       const pct = w.percent != null ? w.percent + '%' : '?';
       const resets = w.resetsAt ? ` (resets ${humanizeReset(w.resetsAt)})` : '';
-      const wi = windowInfo(history, win, now);
+      const wi = windowInfo(history, win, now, w.resetsAt);
       let deltaStr = '';
       if (wi && wi.delta != null) {
         const sign = wi.delta > 0 ? '+' : '';
@@ -1436,12 +1465,12 @@ function renderMarkdown(report) {
   lines.push('**Projected threshold crossings**:');
   lines.push('');
   for (const win of ['rolling', 'weekly', 'monthly']) {
-    const wi = windowInfo(history, win, now);
+    const wi = windowInfo(history, win, now, upcomingUsage[win] && upcomingUsage[win].resetsAt);
     if (!history.length || !wi) {
       lines.push(`- ${win} projection: n/a`);
       continue;
     }
-    const proj = changeMetric.projectThresholds(wi, now);
+    const proj = changeMetric.projectThresholds(wi, now, upcomingUsage[win] && upcomingUsage[win].resetsAt);
     if (!proj) {
       lines.push(`- ${win} projection: stable (no increase detected)`);
     } else if (proj.daysToWarn === 0) {
@@ -1463,7 +1492,7 @@ function renderMarkdown(report) {
   try {
     const burnUsage = report.usage && report.usage.usage ? report.usage.usage : report.usage || {};
     for (const win of ['rolling', 'weekly', 'monthly']) {
-      const wi = windowInfo(history, win, now);
+      const wi = windowInfo(history, win, now, (burnUsage[win] || {}).resetsAt);
       if (!history.length || !wi) {
         lines.push(`- ${win} burn: n/a`);
         continue;
@@ -1529,13 +1558,14 @@ function writeReport(report) {
 const MODEL_TABLE_MAX = 1900; // Discord content cap w/ headroom (hard limit 2000)
 const MODEL_TABLE_MAX_ROWS = 10; // rows per post before a "+N more" tail
 
-// Format a cost metric for the table: up to 6 sig figs, trailing zeros dropped
-// (e.g. 0.004375, 0.14, 2.5). Missing/NaN becomes an em-dash.
+// Format a cost metric for the table via the shared trimNum helper (v0.19.0,
+// #110: single number-formatting rule — see change-metric.fmtMoney). Missing /
+// NaN becomes an em-dash.
 function fmtModelCost(x) {
   if (x == null) return '—';
   const n = Number(x);
   if (isNaN(n)) return '—';
-  return String(parseFloat(n.toPrecision(6)));
+  return changeMetric.trimNum(n);
 }
 
 function truncateModelId(s, n) {
@@ -1783,10 +1813,12 @@ function movedTierBound(oldTiers, newTiers) {
 
 // Format the effective-price multiplier (MONTHLY_CREDIT / usage-cap) for chat:
 // 4 -> "4x", 1 -> "1x", 0.6 -> "0.6x". Missing/NaN becomes an em-dash.
+// v0.19.0 (#110): via the shared trimNum helper so non-integer caps (e.g.
+// 60/45 = 1.33333x) round-trip without float artifacts.
 function fmtMult(m) {
   const n = Number(m);
   if (!isFinite(n)) return '—';
-  return parseFloat(n.toFixed(2)).toString() + 'x';
+  return changeMetric.trimNum(n) + 'x';
 }
 
 // Short metric keys for the compact tier line (input/output/cache_read/cache_write
@@ -2132,6 +2164,7 @@ module.exports = {
   beginCycleCache,
   clearCycleCache,
   windowInfo,
+  RESET_DROP_PTS,
   deliverModelChangeTable,
   buildModelChangeChunks,
   deliverDigestToWebhook,

@@ -177,7 +177,7 @@ function rankByEffective(models, pattern, limit) {
       requestsPerMo: requestsPerMonth(effective)
     });
   }
-  rows.sort((a, b) => a.effective - b.effective);
+  rows.sort((a, b) => (a.effective - b.effective) || a.id.localeCompare(b.id));
   return typeof limit === 'number' ? rows.slice(0, limit) : rows;
 }
 
@@ -190,6 +190,7 @@ function leaderboard(models, pattern, limit) {
   const rows = rankByEffective(models, pattern);
   for (const r of rows) {
     r.cap = usageTable.getUsageCap(r.id, SILENT_LOG);
+    r.capKnown = usageTable.hasCap(r.id);
     r.multiplier = usageTable.effectiveMultiplier(r.id, SILENT_LOG);
     r.requestsPerMo = requestsPerMonth(r.effective);
   }
@@ -254,6 +255,9 @@ function parseArgs(argv) {
 }
 
 function fmtUsd(n) {
+  // CLI-only display formatter. Per-surface rule (v0.19.0, #110): money on
+  // alerts/digest/report/page renders via change-metric trimNum/fmtMoney;
+  // this CLI readout keeps its own fixed-6 shape intentionally.
   if (n == null) return 'n/a';
   if (!isFinite(n)) return '∞';
   if (n !== 0 && n < 0.0001) return '$' + n.toExponential(2);
