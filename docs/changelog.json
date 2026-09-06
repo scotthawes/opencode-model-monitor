@@ -1,11 +1,5 @@
 [
   {
-    "ts": "2026-08-30T03:26:56.450Z",
-    "level": "model_change",
-    "title": "Model changed",
-    "message": "Cost changed for hy3: {\"input\":0.0175,\"output\":0.0725,\"cache_read\":0.004375} -> {\"input\":0.14,\"output\":0.58,\"cache_read\":0.035}"
-  },
-  {
     "ts": "2026-09-01T03:44:39.440Z",
     "level": "model_change",
     "title": "Feed update: goPricing",
@@ -418,5 +412,131 @@
     "level": "model_change",
     "title": "Model changed",
     "message": "Free model available: ling-3.0-tiny-free"
+  },
+  {
+    "ts": "2026-09-06T09:48:00.146Z",
+    "level": "model_change",
+    "title": "Feed update: tracker",
+    "message": "chore: update prices 2026-09-05 — https://github.com/all-the-rest/ocgo-price-tracker/commit/543559d06f1310619c002c14e4f88b632decebd3"
+  },
+  {
+    "ts": "2026-09-06T09:48:00.220Z",
+    "level": "model_change",
+    "title": "Feed update: tracker",
+    "message": "fix(theme): first load follows OS theme without localStorage write, t… — https://github.com/all-the-rest/ocgo-price-tracker/commit/4f968458055f07795838698eb1a8139b6449ef7d"
+  },
+  {
+    "ts": "2026-09-06T09:48:00.228Z",
+    "level": "model_change",
+    "title": "Feed update: tracker",
+    "message": "chore: update prices 2026-09-04 — https://github.com/all-the-rest/ocgo-price-tracker/commit/55acbd9325cce71913bbb81913a17c9530e39de6"
+  },
+  {
+    "ts": "2026-09-06T09:48:00.236Z",
+    "level": "model_change",
+    "title": "Feed update: tracker",
+    "message": "fix(changelog): capabilities-Erstbefüllungsfenster 24h → 72h — https://github.com/all-the-rest/ocgo-price-tracker/commit/b29fa1f57b45804b64ce55362faab0ba60774996"
+  },
+  {
+    "ts": "2026-09-06T09:48:00.242Z",
+    "level": "model_change",
+    "title": "Feed update: tracker",
+    "message": "chore: update prices 2026-09-04 — https://github.com/all-the-rest/ocgo-price-tracker/commit/c6b0a0755e9c362bb89564452476cc11483b02db"
+  },
+  {
+    "ts": "2026-09-06T09:48:00.249Z",
+    "level": "model_change",
+    "title": "Feed update: tracker",
+    "message": "feat(privacy): handle expired ZDR as worst-case with 2-day grace, fix… — https://github.com/all-the-rest/ocgo-price-tracker/commit/da1dae8c722d5177d6a44411e0737d821ca96e89"
+  },
+  {
+    "ts": "2026-09-06T09:48:00.270Z",
+    "level": "model_change",
+    "title": "Feed update: tracker",
+    "message": "chore: update prices 2026-09-02 — https://github.com/all-the-rest/ocgo-price-tracker/commit/3aa8068ad9863083a123fcda7c7e4a4b241878b2"
+  },
+  {
+    "ts": "2026-09-06T09:48:00.287Z",
+    "level": "model_change",
+    "title": "Feed update: tracker",
+    "message": "chore(deps-dev): bump the minor-and-patch group with 5 updates (#3) — https://github.com/all-the-rest/ocgo-price-tracker/commit/a93816220c5e5ec26ca9a182a7e4ecf879056d87"
+  },
+  {
+    "ts": "2026-09-06T09:48:00.316Z",
+    "level": "model_change",
+    "title": "Feed update: tracker",
+    "message": "chore(opencode): remove codegraph MCP server (CLI-only usage) — https://github.com/all-the-rest/ocgo-price-tracker/commit/f407ccc5357ec836506ab5f692de35f31eeef6b7"
+  },
+  {
+    "ts": "2026-09-06T09:48:00.341Z",
+    "level": "model_change",
+    "title": "Feed update: tracker",
+    "message": "chore: update prices 2026-09-01 — https://github.com/all-the-rest/ocgo-price-tracker/commit/18bb8afab6c325a5593e30eb4eb733f3ca6cded9"
+  },
+  {
+    "ts": "2026-09-06T09:48:00.348Z",
+    "level": "model_change",
+    "title": "Feed update: tracker",
+    "message": "test(scrape): computePrivacyDiff/NormalizeChangelogIds/parseGermanDat… — https://github.com/all-the-rest/ocgo-price-tracker/commit/ae4aa96bbad6b6f8067dd18ba20df060aa30d44a"
+  },
+  {
+    "ts": "2026-09-06T09:48:00.355Z",
+    "level": "model_change",
+    "title": "Feed update: tracker",
+    "message": "test(release-notes): Abdeckung aller Events + --date nach id, fmtPriv… — https://github.com/all-the-rest/ocgo-price-tracker/commit/80c32bc5085625736db276315ba4f7e82ad0929c"
+  },
+  {
+    "ts": "2026-09-06T09:48:00.372Z",
+    "level": "model_change",
+    "title": "Feed update: tracker",
+    "message": "chore: update prices 2026-08-30 — https://github.com/all-the-rest/ocgo-price-tracker/commit/f3dddf836a9b71e2bdd643c5d3c8dd6b009ba7e7"
+  },
+  {
+    "ts": "2026-09-06T09:48:00.428Z",
+    "level": "model_change",
+    "title": "Feed update: tracker",
+    "message": "chore: update prices 2026-08-30 — https://github.com/all-the-rest/ocgo-price-tracker/commit/a18ec078670a5f1b5fb6854f730ee69d261e99cd"
+  },
+  {
+    "ts": "2026-09-06T09:48:00.473Z",
+    "level": "model_change",
+    "title": "Feed update: tracker",
+    "message": "chore: update prices 2026-08-28 — https://github.com/all-the-rest/ocgo-price-tracker/commit/f8f1f626eb47d89e0c9500646ac5eb0aa4a1b093"
+  },
+  {
+    "ts": "2026-09-06T09:48:00.516Z",
+    "level": "model_change",
+    "title": "Feed update: tracker",
+    "message": "feat: Training-Filter (Modelle mit Model Training anzeigen) in der Go… — https://github.com/all-the-rest/ocgo-price-tracker/commit/3a4c0f3c94b3b996ed170e9fcae769beb4cee301"
+  },
+  {
+    "ts": "2026-09-06T09:48:00.567Z",
+    "level": "model_change",
+    "title": "Feed update: tracker",
+    "message": "fix(changelog): Pfeile bei Guthaben (usage) korrekt – Erhöhung ↑ grün… — https://github.com/all-the-rest/ocgo-price-tracker/commit/151fe575846e88e68a256ada5b8da08327ec1179"
+  },
+  {
+    "ts": "2026-09-06T09:48:00.616Z",
+    "level": "model_change",
+    "title": "Feed update: tracker",
+    "message": "fix: Hersteller großgeschrieben/branded wie cc-price-tracker (Z.ai fü… — https://github.com/all-the-rest/ocgo-price-tracker/commit/c1c38ed617974799f40be439b30a321f076210a2"
+  },
+  {
+    "ts": "2026-09-06T09:48:00.695Z",
+    "level": "model_change",
+    "title": "Feed update: tracker",
+    "message": "data: Free-Modell-Quelle auf Zen-Doku umgestellt — https://github.com/all-the-rest/ocgo-price-tracker/commit/bf7b05c87bf3fedeb6bd2342a2406bbed57f056a"
+  },
+  {
+    "ts": "2026-09-06T09:48:00.758Z",
+    "level": "model_change",
+    "title": "Feed update: tracker",
+    "message": "refactor: gratis Zen-Modelle aus der Doku (Endpunkte + Preise/Free) b… — https://github.com/all-the-rest/ocgo-price-tracker/commit/c1e889bdb009700298562a5e6e3847a9cb6909c1"
+  },
+  {
+    "ts": "2026-09-06T19:24:07.201Z",
+    "level": "model_change",
+    "title": "Model changed",
+    "message": "Model withdrawn: ox-alpha-free (priced but not serving)"
   }
 ]

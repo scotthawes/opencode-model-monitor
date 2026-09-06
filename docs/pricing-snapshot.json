@@ -18,9 +18,9 @@
         "tool_call": true,
         "reasoning": true,
         "attachment": false,
-        "structured_output": false,
+        "structured_output": null,
         "temperature": true,
-        "interleaved": false,
+        "interleaved": null,
         "modalities": {
           "input": [
             "text"
@@ -33,7 +33,9 @@
       "open_weights": false,
       "knowledge": null,
       "release_date": "2026-05-21",
-      "last_updated": "2026-05-21"
+      "last_updated": "2026-05-21",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -54,7 +56,7 @@
         "tool_call": true,
         "reasoning": true,
         "attachment": false,
-        "structured_output": false,
+        "structured_output": null,
         "temperature": true,
         "interleaved": true,
         "modalities": {
@@ -69,7 +71,9 @@
       "open_weights": false,
       "knowledge": null,
       "release_date": "2026-06-30",
-      "last_updated": "2026-06-30"
+      "last_updated": "2026-06-30",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -106,7 +110,9 @@
       "open_weights": false,
       "knowledge": null,
       "release_date": "2026-08-21",
-      "last_updated": "2026-08-21"
+      "last_updated": "2026-08-21",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -128,9 +134,9 @@
         "tool_call": true,
         "reasoning": true,
         "attachment": true,
-        "structured_output": false,
+        "structured_output": null,
         "temperature": true,
-        "interleaved": false,
+        "interleaved": null,
         "modalities": {
           "input": [
             "text",
@@ -145,7 +151,9 @@
       "open_weights": false,
       "knowledge": "2025-04",
       "release_date": "2026-04-02",
-      "last_updated": "2026-04-02"
+      "last_updated": "2026-04-02",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -168,7 +176,7 @@
         "attachment": true,
         "structured_output": true,
         "temperature": true,
-        "interleaved": false,
+        "interleaved": null,
         "modalities": {
           "input": [
             "text",
@@ -185,7 +193,9 @@
       "open_weights": false,
       "knowledge": null,
       "release_date": "2026-08-05",
-      "last_updated": "2026-08-05"
+      "last_updated": "2026-08-05",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -206,9 +216,9 @@
         "tool_call": true,
         "reasoning": true,
         "attachment": false,
-        "structured_output": false,
+        "structured_output": null,
         "temperature": true,
-        "interleaved": false,
+        "interleaved": null,
         "modalities": {
           "input": [
             "text"
@@ -221,7 +231,9 @@
       "open_weights": true,
       "knowledge": "2025-01",
       "release_date": "2026-03-18",
-      "last_updated": "2026-03-18"
+      "last_updated": "2026-03-18",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -242,7 +254,7 @@
         "tool_call": true,
         "reasoning": true,
         "attachment": true,
-        "structured_output": false,
+        "structured_output": null,
         "temperature": true,
         "interleaved": true,
         "modalities": {
@@ -259,7 +271,9 @@
       "open_weights": true,
       "knowledge": "2024-10",
       "release_date": "2026-04-21",
-      "last_updated": "2026-04-21"
+      "last_updated": "2026-04-21",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -295,7 +309,9 @@
       "open_weights": true,
       "knowledge": null,
       "release_date": "2026-06-13",
-      "last_updated": "2026-06-13"
+      "last_updated": "2026-06-13",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -316,9 +332,9 @@
         "tool_call": true,
         "reasoning": true,
         "attachment": false,
-        "structured_output": false,
+        "structured_output": null,
         "temperature": true,
-        "interleaved": false,
+        "interleaved": null,
         "modalities": {
           "input": [
             "text"
@@ -331,7 +347,9 @@
       "open_weights": true,
       "knowledge": "2025-01",
       "release_date": "2026-02-12",
-      "last_updated": "2026-02-12"
+      "last_updated": "2026-02-12",
+      "status": "deprecated",
+      "deprecated": true
     }
   },
   {
@@ -352,9 +370,9 @@
         "tool_call": true,
         "reasoning": true,
         "attachment": false,
-        "structured_output": false,
+        "structured_output": null,
         "temperature": true,
-        "interleaved": false,
+        "interleaved": null,
         "modalities": {
           "input": [
             "text",
@@ -369,7 +387,9 @@
       "open_weights": true,
       "knowledge": "2025-01",
       "release_date": "2026-05-31",
-      "last_updated": "2026-05-31"
+      "last_updated": "2026-05-31",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -405,7 +425,9 @@
       "open_weights": true,
       "knowledge": "2025-05",
       "release_date": "2026-07-31",
-      "last_updated": "2026-07-31"
+      "last_updated": "2026-07-31",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -443,7 +465,9 @@
       "open_weights": true,
       "knowledge": "2025-01",
       "release_date": "2026-06-12",
-      "last_updated": "2026-06-12"
+      "last_updated": "2026-06-12",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -466,7 +490,7 @@
         "attachment": true,
         "structured_output": true,
         "temperature": true,
-        "interleaved": false,
+        "interleaved": null,
         "modalities": {
           "input": [
             "text",
@@ -480,7 +504,9 @@
       "open_weights": false,
       "knowledge": null,
       "release_date": "2026-07-08",
-      "last_updated": "2026-07-08"
+      "last_updated": "2026-07-08",
+      "status": "deprecated",
+      "deprecated": true
     }
   },
   {
@@ -518,7 +544,9 @@
       "open_weights": false,
       "knowledge": null,
       "release_date": "2026-08-21",
-      "last_updated": "2026-08-21"
+      "last_updated": "2026-08-21",
+      "status": "deprecated",
+      "deprecated": true
     }
   },
   {
@@ -539,9 +567,9 @@
         "tool_call": true,
         "reasoning": true,
         "attachment": false,
-        "structured_output": false,
+        "structured_output": null,
         "temperature": true,
-        "interleaved": false,
+        "interleaved": null,
         "modalities": {
           "input": [
             "text"
@@ -554,7 +582,9 @@
       "open_weights": true,
       "knowledge": null,
       "release_date": "2026-07-06",
-      "last_updated": "2026-07-06"
+      "last_updated": "2026-07-06",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -575,9 +605,9 @@
         "tool_call": true,
         "reasoning": true,
         "attachment": false,
-        "structured_output": false,
+        "structured_output": null,
         "temperature": true,
-        "interleaved": false,
+        "interleaved": null,
         "modalities": {
           "input": [
             "text"
@@ -590,7 +620,9 @@
       "open_weights": true,
       "knowledge": null,
       "release_date": "2026-08-28",
-      "last_updated": "2026-08-28"
+      "last_updated": "2026-08-28",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -627,7 +659,9 @@
       "open_weights": false,
       "knowledge": null,
       "release_date": "2026-09-04",
-      "last_updated": "2026-09-04"
+      "last_updated": "2026-09-04",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -651,7 +685,7 @@
         "attachment": true,
         "structured_output": true,
         "temperature": false,
-        "interleaved": false,
+        "interleaved": null,
         "modalities": {
           "input": [
             "text",
@@ -666,7 +700,9 @@
       "open_weights": false,
       "knowledge": "2026-02-16",
       "release_date": "2026-07-09",
-      "last_updated": "2026-07-09"
+      "last_updated": "2026-07-09",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -704,7 +740,9 @@
       "open_weights": true,
       "knowledge": null,
       "release_date": "2026-07-16",
-      "last_updated": "2026-07-16"
+      "last_updated": "2026-07-16",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -743,7 +781,9 @@
       "open_weights": false,
       "knowledge": null,
       "release_date": "2026-08-26",
-      "last_updated": "2026-08-26"
+      "last_updated": "2026-08-26",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -766,7 +806,7 @@
         "attachment": true,
         "structured_output": true,
         "temperature": true,
-        "interleaved": false,
+        "interleaved": null,
         "modalities": {
           "input": [
             "text",
@@ -783,7 +823,9 @@
       "open_weights": false,
       "knowledge": null,
       "release_date": "2026-09-02",
-      "last_updated": "2026-09-02"
+      "last_updated": "2026-09-02",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -804,7 +846,7 @@
         "tool_call": true,
         "reasoning": true,
         "attachment": true,
-        "structured_output": false,
+        "structured_output": null,
         "temperature": true,
         "interleaved": true,
         "modalities": {
@@ -819,7 +861,9 @@
       "open_weights": true,
       "knowledge": "2024-12",
       "release_date": "2026-03-18",
-      "last_updated": "2026-03-18"
+      "last_updated": "2026-03-18",
+      "status": "deprecated",
+      "deprecated": true
     }
   },
   {
@@ -843,7 +887,7 @@
         "attachment": true,
         "structured_output": true,
         "temperature": true,
-        "interleaved": false,
+        "interleaved": null,
         "modalities": {
           "input": [
             "text",
@@ -858,7 +902,9 @@
       "open_weights": false,
       "knowledge": null,
       "release_date": "2026-08-26",
-      "last_updated": "2026-08-26"
+      "last_updated": "2026-08-26",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -881,7 +927,7 @@
         "attachment": true,
         "structured_output": true,
         "temperature": true,
-        "interleaved": false,
+        "interleaved": null,
         "modalities": {
           "input": [
             "text",
@@ -895,7 +941,9 @@
       "open_weights": false,
       "knowledge": "2026-02-01",
       "release_date": "2026-08-12",
-      "last_updated": "2026-08-12"
+      "last_updated": "2026-08-12",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -916,7 +964,7 @@
         "tool_call": true,
         "reasoning": true,
         "attachment": false,
-        "structured_output": false,
+        "structured_output": null,
         "temperature": true,
         "interleaved": true,
         "modalities": {
@@ -931,7 +979,9 @@
       "open_weights": true,
       "knowledge": "2025-04",
       "release_date": "2026-02-11",
-      "last_updated": "2026-02-11"
+      "last_updated": "2026-02-11",
+      "status": "deprecated",
+      "deprecated": true
     }
   },
   {
@@ -952,7 +1002,7 @@
         "tool_call": true,
         "reasoning": true,
         "attachment": true,
-        "structured_output": false,
+        "structured_output": null,
         "temperature": true,
         "interleaved": true,
         "modalities": {
@@ -970,7 +1020,9 @@
       "open_weights": true,
       "knowledge": "2024-12",
       "release_date": "2026-03-18",
-      "last_updated": "2026-03-18"
+      "last_updated": "2026-03-18",
+      "status": "deprecated",
+      "deprecated": true
     }
   },
   {
@@ -994,7 +1046,7 @@
         "attachment": true,
         "structured_output": true,
         "temperature": true,
-        "interleaved": false,
+        "interleaved": null,
         "modalities": {
           "input": [
             "text",
@@ -1009,7 +1061,9 @@
       "open_weights": false,
       "knowledge": null,
       "release_date": "2026-08-03",
-      "last_updated": "2026-08-03"
+      "last_updated": "2026-08-03",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -1030,7 +1084,7 @@
         "tool_call": true,
         "reasoning": true,
         "attachment": true,
-        "structured_output": false,
+        "structured_output": null,
         "temperature": true,
         "interleaved": true,
         "modalities": {
@@ -1047,7 +1101,9 @@
       "open_weights": true,
       "knowledge": "2024-10",
       "release_date": "2026-01-27",
-      "last_updated": "2026-01-27"
+      "last_updated": "2026-01-27",
+      "status": "deprecated",
+      "deprecated": true
     }
   },
   {
@@ -1068,7 +1124,7 @@
         "tool_call": true,
         "reasoning": true,
         "attachment": false,
-        "structured_output": false,
+        "structured_output": null,
         "temperature": true,
         "interleaved": true,
         "modalities": {
@@ -1083,7 +1139,9 @@
       "open_weights": true,
       "knowledge": "2025-04",
       "release_date": "2026-04-07",
-      "last_updated": "2026-04-07"
+      "last_updated": "2026-04-07",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -1105,9 +1163,9 @@
         "tool_call": true,
         "reasoning": true,
         "attachment": true,
-        "structured_output": false,
+        "structured_output": null,
         "temperature": true,
-        "interleaved": false,
+        "interleaved": null,
         "modalities": {
           "input": [
             "text",
@@ -1122,7 +1180,9 @@
       "open_weights": false,
       "knowledge": null,
       "release_date": "2026-06-02",
-      "last_updated": "2026-06-02"
+      "last_updated": "2026-06-02",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -1158,7 +1218,9 @@
       "open_weights": true,
       "knowledge": "2025-05",
       "release_date": "2026-04-24",
-      "last_updated": "2026-04-24"
+      "last_updated": "2026-04-24",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -1194,7 +1256,9 @@
       "open_weights": true,
       "knowledge": null,
       "release_date": "2026-08-14",
-      "last_updated": "2026-08-14"
+      "last_updated": "2026-08-14",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -1215,7 +1279,7 @@
         "tool_call": true,
         "reasoning": true,
         "attachment": true,
-        "structured_output": false,
+        "structured_output": null,
         "temperature": true,
         "interleaved": true,
         "modalities": {
@@ -1233,7 +1297,9 @@
       "open_weights": true,
       "knowledge": "2024-12",
       "release_date": "2026-04-22",
-      "last_updated": "2026-04-22"
+      "last_updated": "2026-04-22",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -1254,7 +1320,7 @@
         "tool_call": true,
         "reasoning": true,
         "attachment": true,
-        "structured_output": false,
+        "structured_output": null,
         "temperature": true,
         "interleaved": true,
         "modalities": {
@@ -1269,7 +1335,9 @@
       "open_weights": true,
       "knowledge": "2024-12",
       "release_date": "2026-04-22",
-      "last_updated": "2026-04-22"
+      "last_updated": "2026-04-22",
+      "status": null,
+      "deprecated": false
     }
   },
   {
@@ -1291,9 +1359,9 @@
         "tool_call": true,
         "reasoning": true,
         "attachment": true,
-        "structured_output": false,
+        "structured_output": null,
         "temperature": true,
-        "interleaved": false,
+        "interleaved": null,
         "modalities": {
           "input": [
             "text",
@@ -1308,11 +1376,19 @@
       "open_weights": false,
       "knowledge": "2025-04",
       "release_date": "2026-02-16",
-      "last_updated": "2026-02-16"
+      "last_updated": "2026-02-16",
+      "status": "deprecated",
+      "deprecated": true
     }
   },
   {
     "id": "freeModels",
+    "cost": {},
+    "tiers": null,
+    "meta": {}
+  },
+  {
+    "id": "zenModels",
     "cost": {},
     "tiers": null,
     "meta": {}
