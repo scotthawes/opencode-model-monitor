@@ -5,6 +5,8 @@ const path = require('path');
 const { loadConfig } = require('./config');
 const delivery = require('./delivery');
 const { runPriceWatch } = require('./price-watch');
+const { runCatalogWatch } = require('./catalog-watch');
+const { runLivenessWatch, classifyOutage } = require('./liveness-watch');
 const { runUsage } = require('./usage');
 const { runConfigScan } = require('./config-scan');
 const { runAtomWatch } = require('./atom-watch');
@@ -192,6 +194,52 @@ async function main() {
       error: String(e && e.message ? e.message : e)
     }));
 
+    // v0.12.0 (#90): catalog.json cross-check + v1/models liveness, same 30min
+    // cadence as api.json. Both best-effort, never throw, never block the cycle.
+    const catalog = await runCatalogWatch(stateDir, {
+      apiShapeFailed: !!(pricing && pricing.shapeFailed)
+    }).catch((e) => ({
+      status: 'unknown',
+      error: String(e && e.message ? e.message : e),
+      models: {},
+      changes: []
+    }));
+
+    const liveness = await runLivenessWatch(
+      stateDir,
+      config.authJsonPath,
+      modelsMap,
+      usage && usage.status,
+      usage && usage.error
+    ).catch((e) => ({
+      status: 'unknown',
+      error: String(e && e.message ? e.message : e),
+      servingIds: [],
+      withdrawn: [],
+      changes: []
+    }));
+
+    // Outage-vs-quota: both liveness + usage failing means the provider is
+    // likely down; a usage-only failure is quota/auth, not an outage.
+    try {
+      const verdict = classifyOutage(
+        liveness && liveness.status,
+        usage && usage.status,
+        liveness && liveness.error,
+        usage && usage.error
+      );
+      if (verdict === 'outage') {
+        await delivery.alert(
+          'warning',
+          'provider outage suspected',
+          `liveness (${(liveness && liveness.error) || liveness.status}) + usage (${(usage && usage.error) || usage.status}) both failing`,
+          { dedupKey: 'monitor:outage', dedupTtlMs: 3600000 }
+        );
+      }
+    } catch (_) {
+      // best effort
+    }
+
     let pins = [];
     try {
       pins = runConfigScan(config.scanRoots, latestModels);
@@ -222,6 +270,8 @@ async function main() {
       generatedAt: new Date().toISOString(),
       pricing,
       usage,
+      catalog,
+      liveness,
       pins,
       feedUpdates
     };
@@ -280,6 +330,20 @@ async function main() {
     runPriceWatch(stateDir)
       .then((p) => {
         if (p && p.models) latestModels = p.models;
+        // Catalog cross-check rides alongside api.json (same 30min cadence).
+        runCatalogWatch(stateDir, { apiShapeFailed: !!(p && p.shapeFailed) }).catch((e) =>
+          delivery.alert('warning', 'catalog-watch failed', String(e && e.message ? e.message : e), {
+            dedupKey: 'monitor:catalog-watch',
+            dedupTtlMs: 3600000
+          })
+        );
+        // Liveness rides alongside api.json too (IDs only, no pricing).
+        runLivenessWatch(stateDir, config.authJsonPath, (p && p.models) || {}).catch((e) =>
+          delivery.alert('warning', 'liveness-watch failed', String(e && e.message ? e.message : e), {
+            dedupKey: 'monitor:liveness-watch',
+            dedupTtlMs: 3600000
+          })
+        );
       })
     .catch((e) =>
       delivery.alert('warning', 'price-watch failed', String(e && e.message ? e.message : e), {

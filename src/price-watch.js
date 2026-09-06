@@ -434,7 +434,7 @@ async function runPriceWatch(stateDir) {
   if (!shape.ok) {
     delivery.alert('warning', 'Pricing shape unexpected', shape.reason);
     ensureSnapshotExists(snapFile, shape.reason);
-    return { status: 'unknown', error: shape.reason, models: readSnapshot(snapFile), changes: [] };
+    return { status: 'unknown', error: shape.reason, shapeFailed: true, models: readSnapshot(snapFile), changes: [] };
   }
 
   const og = (data && data['opencode-go']) || null;

@@ -1674,6 +1674,13 @@ function modelChangeLineStr(l) {
     if (dn.junk) line += ' · ⚠️ desc-unverified';
     return line;
   }
+  if (l.subtype === 'deprecated') {
+    // v0.12.0 (#90): catalog.json status/deprecated cross-check.
+    const dn = modelDisplayName(l.model, l.meta);
+    let line = `⚠️ ${dn.name} (${l.model}) DEPRECATED`;
+    if (dn.junk) line += ' · ⚠️ desc-unverified';
+    return line;
+  }
   if (l.subtype === 'free') {
     // 🆓 announces a free Zen model; removal/change use distinct markers so the
     // Discord table stays scannable. Additive — never alters billable rows.
@@ -1713,6 +1720,7 @@ function modelChangeHumanMessage(ch) {
   }
   if (ch.subtype === 'added') return `Added model: ${ch.model}`;
   if (ch.subtype === 'removed') return `Removed model: ${ch.model}`;
+  if (ch.subtype === 'deprecated') return `Model deprecated: ${ch.model}`;
   if (ch.subtype === 'tiers') return `Tiers changed for ${ch.model}`;
   if (ch.subtype === 'free') {
     if (ch.reason === 'removed') return `Free model removed: ${ch.model}`;
