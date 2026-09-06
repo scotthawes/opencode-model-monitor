@@ -5,6 +5,7 @@ const path = require('path');
 const { loadConfig } = require('./config');
 const delivery = require('./delivery');
 const { runPriceWatch } = require('./price-watch');
+const { runCapsWatch } = require('./caps-watch');
 const { runCatalogWatch } = require('./catalog-watch');
 const { runLivenessWatch, classifyOutage } = require('./liveness-watch');
 const { runUsage } = require('./usage');
@@ -180,6 +181,15 @@ async function main() {
     maybeRotateAlertsLog(stateDir);
     await delivery.alert('info', 'Monitor cycle started', new Date().toISOString(), { debugOnly: true });
 
+    // v0.13.0 (#92): live usage-cap polling runs BEFORE price-watch in cycle
+    // order so a refreshed src/usage-table.json flows through the existing
+    // price-watch cap detector exactly once. Best-effort, never throws.
+    const caps = await runCapsWatch(stateDir).catch((e) => ({
+      status: 'unknown',
+      error: String(e && e.message ? e.message : e),
+      changes: []
+    }));
+
     const pricing = await runPriceWatch(stateDir).catch((e) => ({
       status: 'unknown',
       error: String(e && e.message ? e.message : e),
@@ -270,6 +280,7 @@ async function main() {
       generatedAt: new Date().toISOString(),
       pricing,
       usage,
+      caps,
       catalog,
       liveness,
       pins,
@@ -327,7 +338,16 @@ async function main() {
   const c = config.cadenceMs;
 
   setInterval(() => {
-    runPriceWatch(stateDir)
+    // Live caps ride alongside api.json (same 30min c.pricing cadence) and run
+    // BEFORE price-watch so the existing cap detector fires once per move.
+    runCapsWatch(stateDir)
+      .catch((e) =>
+        delivery.alert('warning', 'caps-watch failed', String(e && e.message ? e.message : e), {
+          dedupKey: 'monitor:caps-watch',
+          dedupTtlMs: 3600000
+        })
+      )
+      .then(() => runPriceWatch(stateDir))
       .then((p) => {
         if (p && p.models) latestModels = p.models;
         // Catalog cross-check rides alongside api.json (same 30min cadence).

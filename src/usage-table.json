@@ -10,9 +10,9 @@
       100
     ],
     "maintained": true,
-    "source": "https://ocgo-pricing.all-the.rest/data/latest.json",
-    "seededAt": "2026-09-05T20:48:02.871Z",
     "note": "Add/override an entry in `models` to pin a model to a non-default cap. Unknown models fall back to the default cap (60 -> 1x effective). Re-run scripts/seed-usage-table.js to refresh from the public source (best-effort).",
+    "source": "live",
+    "seededAt": "2026-09-05T20:48:02.871Z",
     "capsProvenance": {
       "omen-alpha": {
         "cap": 100,
@@ -79,7 +79,9 @@
         "date": "2026-08-20",
         "source": "ocgo-price-tracker"
       }
-    }
+    },
+    "sourceUrl": "https://ocgo-pricing.all-the.rest/data/latest.json",
+    "fetchedAt": "2026-09-06T09:37:17.477Z"
   },
   "models": {
     "grok-4.6": 15,
@@ -109,8 +111,6 @@
     "deepseek-v4-flash-vision-exp": 15,
     "hy4-preview": 30,
     "hy3": 60,
-    "omen-alpha": 100,
-    "grok-4.6-large": 15,
-    "deepseek-v4-flash-vision": 15
+    "omen-alpha": 100
   }
 }
