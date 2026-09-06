@@ -7,7 +7,7 @@ const delivery = require('./delivery');
 const { runPriceWatch } = require('./price-watch');
 const { runCapsWatch } = require('./caps-watch');
 const { runCatalogWatch } = require('./catalog-watch');
-const { runLivenessWatch, classifyOutage } = require('./liveness-watch');
+const { runLivenessWatch, runZenLivenessWatch, classifyOutage } = require('./liveness-watch');
 const { runUsage } = require('./usage');
 const { runConfigScan } = require('./config-scan');
 const { runAtomWatch } = require('./atom-watch');
@@ -229,20 +229,43 @@ async function main() {
       changes: []
     }));
 
-    // Outage-vs-quota: both liveness + usage failing means the provider is
-    // likely down; a usage-only failure is quota/auth, not an outage.
+    // v0.15.0 (#96): Zen mirror rides the same 30min liveness block (IDs only).
+    // Own ETag + snapshot files; same Bearer key; never throws.
+    const livenessZen = await runZenLivenessWatch(
+      stateDir,
+      config.authJsonPath,
+      modelsMap,
+      usage && usage.status,
+      usage && usage.error
+    ).catch((e) => ({
+      status: 'unknown',
+      error: String(e && e.message ? e.message : e),
+      servingIds: [],
+      withdrawn: [],
+      changes: []
+    }));
+
+    // Outage-vs-quota: liveness (Go and/or Zen) + usage both failing means the
+    // provider is likely down; a usage-only failure is quota/auth, not outage.
     try {
-      const verdict = classifyOutage(
+      const verdictGo = classifyOutage(
         liveness && liveness.status,
         usage && usage.status,
         liveness && liveness.error,
         usage && usage.error
       );
-      if (verdict === 'outage') {
+      const verdictZen = classifyOutage(
+        livenessZen && livenessZen.status,
+        usage && usage.status,
+        livenessZen && livenessZen.error,
+        usage && usage.error
+      );
+      if (verdictGo === 'outage' || verdictZen === 'outage') {
+        const bad = verdictGo === 'outage' ? liveness : livenessZen;
         await delivery.alert(
           'warning',
           'provider outage suspected',
-          `liveness (${(liveness && liveness.error) || liveness.status}) + usage (${(usage && usage.error) || usage.status}) both failing`,
+          `liveness (${(bad && bad.error) || (bad && bad.status)}) + usage (${(usage && usage.error) || usage.status}) both failing`,
           { dedupKey: 'monitor:outage', dedupTtlMs: 3600000 }
         );
       }
@@ -284,6 +307,7 @@ async function main() {
       caps,
       catalog,
       liveness,
+      livenessZen,
       pins,
       feedUpdates
     };
@@ -358,10 +382,17 @@ async function main() {
             dedupTtlMs: 3600000
           })
         );
-        // Liveness rides alongside api.json too (IDs only, no pricing).
+        // Liveness (Go + Zen) rides alongside api.json too (IDs only, no pricing).
         runLivenessWatch(stateDir, config.authJsonPath, (p && p.models) || {}).catch((e) =>
           delivery.alert('warning', 'liveness-watch failed', String(e && e.message ? e.message : e), {
             dedupKey: 'monitor:liveness-watch',
+            dedupTtlMs: 3600000
+          })
+        );
+        // Zen mirror (v0.15.0, #96): own ETag/snapshot, same 30min cadence.
+        runZenLivenessWatch(stateDir, config.authJsonPath, (p && p.models) || {}).catch((e) =>
+          delivery.alert('warning', 'liveness-zen-watch failed', String(e && e.message ? e.message : e), {
+            dedupKey: 'monitor:liveness-zen-watch',
             dedupTtlMs: 3600000
           })
         );
