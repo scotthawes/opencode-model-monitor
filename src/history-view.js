@@ -279,7 +279,7 @@ function main() {
 }
 
 // Export for tests; run CLI only when executed directly.
-module.exports = { generateHistoryHtml, sparkline, esc, metricFor, buildPricingData, generatePublicPage };
+module.exports = { generateHistoryHtml, sparkline, esc, metricFor, buildPricingData, generatePublicPage, parseChangelogFeedLine };
 
 // ===========================================================================
 // Public Pages redesign (Closes #75): price graph + summarized feed + change
@@ -334,6 +334,33 @@ function dayLabelOf(key) {
   const d = Number(parts[2]);
   if (!(m >= 1 && m <= 12)) return key;
   return MONTH_ABBR[m - 1] + ' ' + d;
+}
+
+// Parse a non-cost model_change changelog line into a feed item
+// { model, kind, direction, suffix } — or null for cost lines (covered by the
+// series feed) and unparseable lines. Pure, never throws. v0.18.0 (#107).
+function parseChangelogFeedLine(msg) {
+  try {
+    const m = String(msg || '');
+    if (!m) return null;
+    if (/^🔴\s/.test(m) || /^Cost changed for \S+:/.test(m)) return null; // cost — series covers it
+    let r;
+    if ((r = /^Added model:\s*(\S+)\s*$/.exec(m))) return { model: r[1], kind: 'added', direction: 'down', suffix: 'added to catalog 🟢' };
+    if ((r = /^Removed model:\s*(\S+)\s*$/.exec(m))) return { model: r[1], kind: 'removed', direction: 'up', suffix: 'removed from catalog ⚫' };
+    if ((r = /^Tiers changed for\s+(\S+)\s*$/.exec(m))) return { model: r[1], kind: 'tiers', direction: 'flat', suffix: 'tiers changed ⚪' };
+    if ((r = /^Free model available:\s*(\S+)\s*$/.exec(m))) return { model: r[1], kind: 'free', direction: 'down', suffix: 'free available 🆓' };
+    if ((r = /^Free model changed:\s*(\S+)\s*$/.exec(m))) return { model: r[1], kind: 'free', direction: 'flat', suffix: 'free changed 🟡' };
+    if ((r = /^Free model removed:\s*(\S+)\s*$/.exec(m))) return { model: r[1], kind: 'free', direction: 'up', suffix: 'free removed ⚫' };
+    if ((r = /^Quota moved for\s+(\S+):\s*(.*)$/.exec(m))) return { model: r[1], kind: 'cap', direction: 'flat', suffix: `quota ${r[2]}` };
+    if ((r = /^Model deprecated:\s*(\S+)\s*$/.exec(m))) return { model: r[1], kind: 'deprecated', direction: 'up', suffix: 'DEPRECATED ⚠️' };
+    if ((r = /^Model withdrawn:\s*(\S+)\s*(.*)$/.exec(m))) return { model: r[1], kind: 'withdrawn', direction: 'up', suffix: `withdrawn — priced but not serving 📡` };
+    if ((r = /^Privacy changed for\s+(\S+):\s*(.*)$/.exec(m))) return { model: r[1], kind: 'privacy', direction: 'flat', suffix: `privacy ${r[2]} 🔏` };
+    if ((r = /^Anomaly:\s*(\S+)\s+moved\s+(.*)$/.exec(m))) return { model: r[1], kind: 'anomaly', direction: 'up', suffix: `anomaly: moved ${r[2]} ⚠️` };
+    if ((r = /^Meta changed for\s+(\S+):\s*(.*)$/.exec(m))) return { model: r[1], kind: 'meta', direction: 'flat', suffix: `meta ${r[2]} ℹ️` };
+    return null;
+  } catch (_) {
+    return null;
+  }
 }
 
 // Reduce a changeParts() result to a plain serializable object (or a neutral
@@ -566,6 +593,35 @@ function buildPricingData(history, pricingMap, opts) {
     }
   }
   feed.sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts));
+
+  // v0.18.0 (#107): fold non-cost model_change entries (tiers/cap/free/
+  // deprecated/withdrawn/anomaly/meta/privacy) from the changelog into the feed
+  // so the page shows CHANGES, not just cost moves. Cost lines are skipped —
+  // the series feed above already covers them. Direction colors reuse the price
+  // vocabulary: arrivals green, removals red, everything else neutral grey.
+  try {
+    const cl = opts.changelog;
+    if (Array.isArray(cl)) {
+      for (const e of cl) {
+        if (!e || e.level !== 'model_change') continue;
+        const parsed = parseChangelogFeedLine(e.message);
+        if (!parsed) continue; // cost line or unparseable — never break the feed
+        feed.push({
+          ts: e.ts,
+          model: parsed.model,
+          name: nameOf(parsed.model),
+          metric: parsed.kind,
+          old: null,
+          new: null,
+          direction: parsed.direction,
+          text: `${parsed.model} ${parsed.suffix}`
+        });
+      }
+      feed.sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts));
+    }
+  } catch (_) {
+    // best effort — the cost-only feed above still stands
+  }
 
   return {
     generatedAt: opts.generatedAt || new Date(now).toISOString(),
@@ -828,7 +884,7 @@ ${modelRows}
   <ul id="feed">
 ${feedItems}
   </ul>
-  <p><a href="changelog.json">Full log → changelog.json</a></p>
+  <p><a href="changelog.json">Full log → changelog.json</a> <span class="muted">(model_change events only — warnings/info stay local)</span></p>
 </section>
 
 <footer>Static view — open directly from disk (file://). Graph data is embedded inline; no network fetch required.</footer>

@@ -105,6 +105,24 @@ test('eventForChange maps every model-change subtype', () => {
     assert.strictEqual(events.eventForChange({ subtype: 'free', reason: 'available', model: 'f' }).type, 'free-available');
     assert.strictEqual(events.eventForChange({ subtype: 'free', reason: 'changed', model: 'f' }).type, 'free-changed');
     assert.strictEqual(events.eventForChange({ subtype: 'free', reason: 'removed', model: 'f' }).type, 'free-removed');
+    assert.strictEqual(
+      events.eventForChange({ subtype: 'cap', model: 'x', oldCap: 60, newCap: 15 }).type,
+      'quota-changed'
+    );
+    // v0.18.0 (#107): every surfaced type maps (dedup-safe first-class events).
+    const priv = events.eventForChange({ subtype: 'privacy', model: 'x', old: { training: 'a' }, new: { training: 'b' } });
+    assert.strictEqual(priv.type, 'privacy-changed');
+    assert.deepStrictEqual(priv.old, { training: 'a' });
+    assert.deepStrictEqual(priv.new, { training: 'b' });
+    const dep = events.eventForChange({ subtype: 'deprecated', model: 'x', meta: { deprecated: true } });
+    assert.strictEqual(dep.type, 'deprecated');
+    assert.strictEqual(events.eventForChange({ subtype: 'withdrawn', model: 'x' }).type, 'withdrawn');
+    const anom = events.eventForChange({ subtype: 'anomaly', model: 'x', oldCost: { output: 1 }, newCost: { output: 8 } });
+    assert.strictEqual(anom.type, 'anomaly');
+    assert.deepStrictEqual(anom.new, { output: 8 });
+    const meta = events.eventForChange({ subtype: 'meta', model: 'x', old: { family: 'a' }, new: { family: 'b' } });
+    assert.strictEqual(meta.type, 'meta-changed');
+    assert.deepStrictEqual(meta.new, { family: 'b' });
     // A non-model-change descriptor yields no event.
     assert.strictEqual(events.eventForChange({ subtype: 'feed', model: 'x' }), null);
   } finally {

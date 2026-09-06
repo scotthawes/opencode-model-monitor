@@ -159,9 +159,12 @@ function computeDedupKey(title, message) {
   if (bestId) return 'model:' + bestNorm;
 
   // Fallback: parse candidate model ids straight from the message text.
-  // 1) Explicit structured references we ourselves emit (covers both the api
-  //    diff and the feed phrasing): "Added model: X", "Removed model: X",
-  //    "Cost changed for X: ...", "Tiers changed for X", "Free model ...: X".
+  // 1) Explicit structured references we ourselves emit (covers the api diff,
+  //    the feed phrasing, and the v0.18.0 (#107) surfaced types): "Added model:
+  //    X", "Removed model: X", "Model deprecated: X", "Model withdrawn: X",
+  //    "Cost changed for X: ...", "Tiers changed for X", "Privacy changed for
+  //    X: ...", "Meta changed for X: ...", "Quota moved for X: ...",
+  //    "Anomaly: X moved ...", "Free model ...: X".
   //    The model id may sit between the phrase and the trailing colon
   //    (e.g. "Cost changed for beta: ..."), so the colon is optional and the id
   //    is captured as the first token after the phrase. This lets pure-letter ids
@@ -169,7 +172,7 @@ function computeDedupKey(title, message) {
   //    generic scan (BUG #85: letter-id dedup). The capture class already admits
   //    pure letters, so no further change is needed there.
   const explicit = String(message || '').match(
-    /(?:added model|removed model|cost changed for|tiers changed for|free model (?:available|changed|removed))\s*:?\s*([a-z0-9][a-z0-9\-\.]*)/i
+    /(?:added model|removed model|model deprecated|model withdrawn|cost changed for|tiers changed for|privacy changed for|meta changed for|quota moved for|free model (?:available|changed|removed)|anomaly)\s*:?\s*([a-z0-9][a-z0-9\-\.]*)/i
   );
   if (explicit) return 'model:' + normalize(explicit[1]);
   // (regex above is intentionally case-INSENSITIVE — the `i` flag from the original
@@ -1352,7 +1355,9 @@ function renderMarkdown(report) {
       : [];
     if (within.length) {
       // Show most-recent first (stored oldest→newest, so reverse the last N).
-      const recent = within.slice(-20).reverse();
+      // v0.18.0 (#107): last-30 (was last-20) so a busy week of surfaced
+      // anomaly/meta/privacy lines can't push real moves out of the report.
+      const recent = within.slice(-30).reverse();
       for (const e of recent) {
         lines.push(
           `- [${e.ts}] ${String(e.level || '?').toUpperCase()} | ${e.title || ''} | ${e.message || ''}`
@@ -1363,6 +1368,52 @@ function renderMarkdown(report) {
     }
   } catch (_) {
     lines.push('- No discrete changes recorded.');
+  }
+  lines.push('');
+
+  // v0.18.0 (#107): explicit Liveness + Deprecated sections. The Events list
+  // above already carries the discrete withdrawn/deprecated lines; these state
+  // the CURRENT posture (serving counts, withdrawn ids, deprecated flags) so a
+  // quiet week still shows coverage. Best-effort: missing data degrades to n/a.
+  lines.push('**Liveness** (priced vs serving):');
+  lines.push('');
+  try {
+    const liv = report.liveness || {};
+    const livZen = report.livenessZen || {};
+    const goServing = Array.isArray(liv.servingIds) ? liv.servingIds.length : null;
+    const goWd = Array.isArray(liv.withdrawn) ? liv.withdrawn : [];
+    const zenServing = Array.isArray(livZen.servingIds) ? livZen.servingIds.length : null;
+    const zenWd = Array.isArray(livZen.withdrawn) ? livZen.withdrawn : [];
+    lines.push(
+      `- Go: ${liv.status || 'n/a'}` +
+        (goServing != null ? `, ${goServing} serving` : '') +
+        (goWd.length ? `, ⚠️ withdrawn: ${goWd.join(', ')}` : ', no withdrawals')
+    );
+    lines.push(
+      `- Zen: ${livZen.status || 'n/a'}` +
+        (zenServing != null ? `, ${zenServing} serving` : '') +
+        (zenWd.length ? `, ⚠️ withdrawn: ${zenWd.join(', ')}` : ', no withdrawals')
+    );
+    if (liv.outage && liv.outage !== 'ok') lines.push(`- Go verdict: ${liv.outage}`);
+    if (livZen.outage && livZen.outage !== 'ok') lines.push(`- Zen verdict: ${livZen.outage}`);
+  } catch (_) {
+    lines.push('- Liveness: n/a');
+  }
+  lines.push('');
+  lines.push('**Deprecated** (catalog status cross-check):');
+  lines.push('');
+  try {
+    const catModels = (report.catalog && report.catalog.models) || {};
+    const depIds = Object.keys(catModels).filter((id) => catModels[id] && catModels[id].deprecated);
+    if ((report.catalog && report.catalog.status || 'n/a') === 'n/a' && !depIds.length) {
+      lines.push('- Deprecated: n/a (no catalog data this cycle)');
+    } else if (!depIds.length) {
+      lines.push('- No deprecated models flagged.');
+    } else {
+      for (const id of depIds) lines.push(`- ⚠️ ${id} DEPRECATED`);
+    }
+  } catch (_) {
+    lines.push('- Deprecated: n/a');
   }
   lines.push('');
 
@@ -1846,7 +1897,54 @@ function modelChangeLineStr(l) {
     const moreLess = l.direction === 'downgraded' ? 'more expensive' : 'cheaper';
     return `${tag} ${l.model} QUOTA ${l.oldCap}→${l.newCap} (${l.factor}x ${moreLess})  ·  ${metaShort(l.meta)}`;
   }
-  return `• ${l.model} ${l.subtype || 'changed'}  ·  ${meta}`;
+  // v0.18.0 (#107): table lines for the previously unsurfaced types. Markers
+  // reuse the existing vocabulary (⚠️ liveness/price alarm, 🔏 privacy, 📡
+  // serving probe) with ℹ️ added for info-level meta moves.
+  if (l.subtype === 'withdrawn') {
+    const dn = modelDisplayName(l.model, l.meta);
+    let line = `📡 ${dn.name} (${l.model}) WITHDRAWN — priced but not serving`;
+    if (dn.junk) line += ' · ⚠️ desc-unverified';
+    return line;
+  }
+  if (l.subtype === 'privacy') {
+    const dn = modelDisplayName(l.model, l.meta);
+    return `🔏 ${dn.name} (${l.model}) PRIVACY ${formatPrivacyWords(l.old)} → ${formatPrivacyWords(l.new)}`;
+  }
+  if (l.subtype === 'anomaly') {
+    let text = null;
+    try {
+      text = changeMetric.anomalyText(l.model, l.oldCost, l.newCost);
+    } catch (_) {
+      text = null;
+    }
+    return `⚠️ ${text || `Anomaly: ${l.model} sudden price move`}`;
+  }
+  if (l.subtype === 'meta') {
+    return `ℹ️ ${metaMapsHumanText(l.model, l.old, l.new)}`;
+  }
+  return `• ${l.model} ${l.subtype || 'changed'}  ·  ${metaShort(l.meta)}`;
+}
+
+// Human-readable single line for a meta move carried as old/new field maps:
+//   "Meta changed for <id>: family A→B; knowledge X→Y"
+// Same shape as changeMetric.metaChangeText (which takes full metas); this one
+// takes the already-diffed maps from a { subtype:'meta' } descriptor. Never throws.
+function metaMapsHumanText(model, oldMap, newMap) {
+  try {
+    const a = oldMap && typeof oldMap === 'object' ? oldMap : {};
+    const b = newMap && typeof newMap === 'object' ? newMap : {};
+    const keys = [];
+    for (const k of Object.keys(a)) if (!keys.includes(k)) keys.push(k);
+    for (const k of Object.keys(b)) if (!keys.includes(k)) keys.push(k);
+    const fmtV = (v) => (v == null ? '?' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+    const bits = keys
+      .filter((k) => JSON.stringify(a[k] == null ? null : a[k]) !== JSON.stringify(b[k] == null ? null : b[k]))
+      .map((k) => `${k} ${fmtV(a[k])}→${fmtV(b[k])}`);
+    if (!bits.length) return `Meta changed for ${model}`;
+    return `Meta changed for ${model}: ${bits.join('; ')}`;
+  } catch (_) {
+    return `Meta changed for ${model}`;
+  }
 }
 
 // Human-readable single line (matches price-watch's legacy string format so the
@@ -1871,6 +1969,19 @@ function modelChangeHumanMessage(ch) {
     const moreLess = ch.direction === 'downgraded' ? 'more expensive' : 'cheaper';
     return `Quota moved for ${ch.model}: $${ch.oldCap} -> $${ch.newCap} (${ch.factor}x ${moreLess})`;
   }
+  // v0.18.0 (#107): surfacing for the previously JSONL/report-only types.
+  if (ch.subtype === 'withdrawn') return `Model withdrawn: ${ch.model} (priced but not serving)`;
+  if (ch.subtype === 'privacy') {
+    return `Privacy changed for ${ch.model}: ${formatPrivacyWords(ch.old)} -> ${formatPrivacyWords(ch.new)}`;
+  }
+  if (ch.subtype === 'anomaly') {
+    try {
+      const text = changeMetric.anomalyText(ch.model, ch.oldCost, ch.newCost);
+      if (text) return text;
+    } catch (_) {}
+    return `Anomaly: ${ch.model} sudden price move`;
+  }
+  if (ch.subtype === 'meta') return metaMapsHumanText(ch.model, ch.old, ch.new);
   return `Model changed: ${ch.model}`;
 }
 
@@ -2031,6 +2142,7 @@ module.exports = {
   costChangeHumanText,
   modelChangeHumanMessage,
   modelChangeLineStr,
+  metaMapsHumanText,
   modelDisplayName,
   prettyId,
   isJunkDesc,

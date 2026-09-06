@@ -42,7 +42,11 @@ const META_FIELDS = [
   'open_weights',
   'knowledge',
   'release_date',
-  'last_updated'
+  'last_updated',
+  // v0.18.0 (#107): keep the catalog status/deprecated signal so the public
+  // page can show deprecation posture (was stripped, hiding `deprecated`).
+  'status',
+  'deprecated'
 ];
 
 // Substrings that must NEVER appear in published output (privacy guardrail).
@@ -149,6 +153,8 @@ function sanitizeHistory(history) {
 }
 
 // Changelog: keep ONLY `model_change` events (public pricing changes).
+// Warnings/info stay OUT by design (quota % and fetch errors are personal or
+// noisy) — the page labels the Full log as model_change-only (v0.18.0, #107).
 function filterChangelog(changelog) {
   if (!Array.isArray(changelog)) return [];
   return changelog
@@ -213,7 +219,10 @@ function buildSnapshot(outDir, inDir) {
   // PR page redesign (Closes #75): build the allowlisted public page data once
   // and reuse it for BOTH docs/pricing.json (7d deltas per model) and the
   // embedded graph/table/feed in docs/index.html.
-  const pageData = buildPricingData(cleanHistory, cleanPricing.map, { generatedAt });
+  // v0.18.0 (#107): the model_change-only changelog rides along so the page
+  // feed shows tiers/cap/free/deprecated/withdrawn/anomaly/meta/privacy moves,
+  // not just cost.
+  const pageData = buildPricingData(cleanHistory, cleanPricing.map, { generatedAt, changelog: cleanChangelog });
   const html = generatePublicPage(cleanHistory, {
     pricing: cleanPricing.map,
     generatedAt,
@@ -270,7 +279,8 @@ Generated: ${generatedAt}
    model, rows colored by direction. No per-model usage is published, so usage
    coloring is intentionally N/A (price-only).
 4. **Recent feed** — last 8-10 summarized price-change one-liners with change
-   metric, plus a link to the full public log (\`changelog.json\`).
+    metric, plus a link to the full public log (\`changelog.json\`,
+    \`model_change\` events only — warnings/info stay local).
 
 ## What is published
 
@@ -280,7 +290,7 @@ Generated: ${generatedAt}
 | \`pricing.json\` | Allowlisted page data: 30-day deltas per model, graph series, top movers, recent feed |
 | \`pricing-snapshot.json\` | Latest public per-model pricing (cost / tiers / meta) |
 | \`history.json\` | Public per-sample pricing history |
-| \`changelog.json\` | Only \`model_change\` events (pricing changes) — linked as the "Full log" |
+| \`changelog.json\` | Only \`model_change\` events (pricing changes) — linked as the "Full log" (warnings/info stay local) |
 
 ## Regenerate locally
 

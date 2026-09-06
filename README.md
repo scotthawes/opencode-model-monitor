@@ -429,6 +429,27 @@ limit) so a post is never dropped. The digest reuses the same Discord
 `{ content, username }` shape and forum-`?thread_name=`/`?thread_id=` handling
 as single alerts.
 
+#### Display caps (what each surface shows)
+
+Every change type (added/removed/cost/tiers/cap/free/deprecated/withdrawn/
+anomaly/meta/privacy) reaches all five surfaces, but each surface caps how
+much it shows — the full history always lives in `state/changelog.json`
+(7 days / 500 entries) and `state/events-YYYY-MM.jsonl` (unbounded):
+
+- **report.md Events** — last **30** entries, newest first, plus explicit
+  **Liveness** (Go/Zen serving counts + withdrawn ids) and **Deprecated**
+  (catalog flags) sections.
+- **Discord digest "What changed"** — top **8** events (model changes first,
+  then model-ish warnings/info), then "+N more".
+- **Discord model table** — cost moves as table rows (10 per post), everything
+  else as one-liner bullets in the first chunk.
+- **Public page feed** — last **10** mixed changes (cost + tiers/cap/free/
+  deprecated/withdrawn/anomaly/meta/privacy); top movers / leaderboard top 10.
+- **Public Full log** (`docs/changelog.json`) — `model_change` events only, by
+  design (warnings/info such as quota % stay local); the page labels the filter.
+- **Seed `usage-moved`/`info` history** — JSONL event log only, invisible on
+  all five surfaces by design.
+
 ## Run continuously
 
 For background operation, run the monitor detached or install it as a service:
