@@ -266,7 +266,8 @@ async function main() {
       const results = await Promise.all([
         runAtomWatch(stateDir, 'goPricing', feeds.goPricing),
         runAtomWatch(stateDir, 'zenPricing', feeds.zenPricing),
-        runAtomWatch(stateDir, 'releases', feeds.releases)
+        runAtomWatch(stateDir, 'releases', feeds.releases),
+        runAtomWatch(stateDir, 'tracker', feeds.tracker)
       ]);
       for (const r of results) feedUpdates.push(r);
     } catch (e) {
@@ -422,6 +423,17 @@ async function main() {
     );
   }, c.releases);
 
+  // Tracker repo commits (free/usage-moved/privacy/info events invisible live):
+  // same idempotent seenIds pattern, on its own 6h cadence for freshness.
+  setInterval(() => {
+    runAtomWatch(stateDir, 'tracker', config.feeds.tracker).catch((e) =>
+      delivery.alert('warning', 'atom-watch failed: tracker', String(e && e.message ? e.message : e), {
+        dedupKey: 'monitor:atom:tracker',
+        dedupTtlMs: 3600000
+      })
+    );
+  }, c.tracker);
+
   // Periodic Discord digest: post the human-readable 7-day summary once a day
   // so the Discord channel becomes the alert + report hub (not just alerts).
   setInterval(() => {
@@ -439,7 +451,7 @@ async function main() {
     'info',
     'Monitor running (continuous)',
     `usage every ${c.usage}ms, pricing every ${c.pricing}ms, config-scan every ${c.db}ms, ` +
-      `atom feeds every ${c.atom}ms, releases every ${c.releases}ms`,
+      `atom feeds every ${c.atom}ms, releases every ${c.releases}ms, tracker every ${c.tracker}ms`,
     { debugOnly: true }
   );
 }

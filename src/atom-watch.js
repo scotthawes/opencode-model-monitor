@@ -43,7 +43,10 @@ async function runAtomWatch(stateDir, key, feedUrl) {
       headers: reqEtag ? { 'If-None-Match': reqEtag } : {}
     });
   } catch (e) {
-    delivery.alert('warning', 'Feed fetch failed: ' + key, String(e && e.message ? e.message : e));
+    delivery.alert('warning', 'Feed fetch failed: ' + key, String(e && e.message ? e.message : e), {
+      dedupKey: 'monitor:atom-feed:' + key,
+      dedupTtlMs: 3600000
+    });
     return { key, newEntries: [] };
   }
 
@@ -52,7 +55,10 @@ async function runAtomWatch(stateDir, key, feedUrl) {
   }
 
   if (!res.ok) {
-    delivery.alert('warning', `Feed fetch HTTP ${res.status}: ${key}`, feedUrl);
+    delivery.alert('warning', `Feed fetch HTTP ${res.status}: ${key}`, feedUrl, {
+      dedupKey: 'monitor:atom-feed:' + key,
+      dedupTtlMs: 3600000
+    });
     return { key, newEntries: [] };
   }
 
