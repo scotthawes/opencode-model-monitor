@@ -15,6 +15,7 @@ const delivery = require('../src/delivery');
 const {
   runLivenessWatch,
   runZenLivenessWatch,
+  buildZenPricedSet,
   extractServingIds,
   computeWithdrawn,
   classifyOutage,
@@ -195,6 +196,106 @@ test('go path untouched (own files, zen files absent)', async () => {
     assert.ok(fs.existsSync(path.join(d, 'liveness-snapshot.json')), 'Go snapshot must exist');
     assert.ok(!fs.existsSync(path.join(d, 'liveness-zen-snapshot.json')), 'Zen snapshot must not be written by Go run');
     assert.ok(!fs.existsSync(path.join(d, '.etag-liveness-zen')), 'Zen etag must not be written by Go run');
+  } finally {
+    restoreFetch();
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+// --- Zen scoping (#98) ------------------------------------------------------
+// The Zen check must diff ZEN-priced + free ids against Zen serving — never
+// GO-priced ids. Go-vs-Zen catalog divergence (Go-only models absent from Zen
+// serving) is expected, not a withdrawal.
+
+test('buildZenPricedSet unions billable + free, drops reserved keys', () => {
+  // Map + array inputs, deduped.
+  assert.deepStrictEqual(
+    buildZenPricedSet({ 'za': { cost: {} }, 'zb': { cost: {} } }, ['zb', 'zfree-free']),
+    ['za', 'zb', 'zfree-free']
+  );
+  // Whole-snapshot map as first arg: reserved keys are dropped.
+  assert.deepStrictEqual(
+    buildZenPricedSet(
+      { 'za': {}, freeModels: { 'zfree-free': {} }, modelPrivacy: {}, zenModels: { 'za': {} } },
+      { 'zfree-free': {} }
+    ),
+    ['za', 'zfree-free']
+  );
+  // Nullish / junk never throws, yields [].
+  assert.deepStrictEqual(buildZenPricedSet(null, undefined), []);
+  assert.deepStrictEqual(buildZenPricedSet('nope', 42), []);
+});
+
+test('go-only model absent from zen serving does NOT alert', async () => {
+  const d = tmpDir();
+  try {
+    setup(d);
+    const auth = writeAuthKey(d, 'sk-test');
+    // Zen-priced set built the #98 way: Zen billable + free only. The Go-only
+    // model (hy3-style) is NOT a member, so its absence from Zen serving must
+    // not appear in withdrawn/changes.
+    const zenPriced = buildZenPricedSet(['zen-a', 'zen-b'], ['zen-free-free']);
+    mockZenFetch(['zen-a', 'zen-free-free']);
+    const r = await runZenLivenessWatch(d, auth, zenPriced, 'ok', null);
+    assert.strictEqual(r.status, 'ok');
+    assert.deepStrictEqual(r.withdrawn, ['zen-b']);
+    assert.ok(!r.withdrawn.includes('hy3'), 'Go-only model must never be Zen-withdrawn');
+    assert.ok(!r.changes.some((c) => c.includes('hy3')), 'Go-only model must never emit a Zen change line');
+  } finally {
+    restoreFetch();
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('zen-priced absent from zen serving DOES alert', async () => {
+  const d = tmpDir();
+  try {
+    setup(d);
+    const auth = writeAuthKey(d, 'sk-test');
+    const zenPriced = buildZenPricedSet({ 'zen-a': {}, 'zen-gone': {} }, []);
+    mockZenFetch(['zen-a']);
+    const r = await runZenLivenessWatch(d, auth, zenPriced, 'ok', null);
+    assert.deepStrictEqual(r.withdrawn, ['zen-gone']);
+    assert.ok(r.changes.some((c) => c.includes('priced but not serving: zen-gone')));
+  } finally {
+    restoreFetch();
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('free model absent from zen serving DOES alert', async () => {
+  const d = tmpDir();
+  try {
+    setup(d);
+    const auth = writeAuthKey(d, 'sk-test');
+    const zenPriced = buildZenPricedSet([], { 'zen-free-free': { cost: {} }, 'zen-kept-free': { cost: {} } });
+    mockZenFetch(['zen-kept-free']);
+    const r = await runZenLivenessWatch(d, auth, zenPriced, 'ok', null);
+    assert.deepStrictEqual(r.withdrawn, ['zen-free-free']);
+    assert.ok(r.changes.some((c) => c.includes('priced but not serving: zen-free-free')));
+  } finally {
+    restoreFetch();
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('zen dedup uses bumped liveness-zen2 prefix (no stale suppression)', async () => {
+  const d = tmpDir();
+  try {
+    setup(d);
+    const auth = writeAuthKey(d, 'sk-test');
+    mockZenFetch(['zen-a']);
+    const r = await runZenLivenessWatch(d, auth, ['zen-a', 'zen-gone'], 'ok', null);
+    assert.deepStrictEqual(r.withdrawn, ['zen-gone']);
+    const dedup = JSON.parse(fs.readFileSync(path.join(d, 'dedup.json'), 'utf8'));
+    assert.ok(
+      Object.keys(dedup).includes('reserved:liveness-zen2:missing:zen-gone'),
+      'expected bumped dedup key, got: ' + JSON.stringify(Object.keys(dedup))
+    );
+    assert.ok(
+      !Object.keys(dedup).some((k) => k === 'reserved:liveness-zen:missing:zen-gone'),
+      'old Go-scoped prefix must not be written'
+    );
   } finally {
     restoreFetch();
     fs.rmSync(d, { recursive: true, force: true });

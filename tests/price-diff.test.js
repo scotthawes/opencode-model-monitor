@@ -348,7 +348,111 @@ test('free detection is additive: no Zen key means no free models and no regress
     mockFetch({ a: mk({ input: 1 }) });
     const r = await runPriceWatch(d);
     assert.deepStrictEqual(r.freeModels, [], 'freeModels should be empty with no Zen key');
+    assert.deepStrictEqual(r.zenModels, [], 'zenModels should be empty with no Zen key');
     assert.strictEqual(r.changes.length, 0, 'expected zero changes, got: ' + JSON.stringify(r.changes));
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+// --- Zen billable set for Zen liveness scoping (#98) ------------------------
+// The opencode-provider BILLABLE ids are tracked in the snapshot (`zenModels`)
+// and returned by runPriceWatch so monitor.js can scope Zen liveness to
+// Zen-priced + free — never the opencode-go map. Fully additive: the Go
+// cost/tiers diff is untouched.
+
+test('paid Zen models are tracked as zenModels without touching the Go diff', async () => {
+  const d = tmpDir();
+  try {
+    setup(d);
+    writeSnapshot(d, { a: mk({ input: 1 }) });
+    mockFetchWithZen({ a: mk({ input: 1 }) }, { 'zenpaid': mk({ input: 5, output: 9 }), 'zenfree-free': mk({ input: 0 }) });
+    const r = await runPriceWatch(d);
+    assert.deepStrictEqual(r.zenModels, ['zenpaid'], 'expected zenpaid in zenModels, got: ' + JSON.stringify(r.zenModels));
+    assert.ok(r.freeModels.includes('zenfree-free'), 'free model must still be tracked');
+    assert.ok(!r.zenModels.includes('zenfree-free'), 'free model must NOT be in the billable set');
+    assert.ok(!r.zenModels.includes('a'), 'Go model must NOT be in the Zen billable set');
+    // Go diff untouched: no added/removed/cost noise for a.
+    assert.ok(!r.changes.some((c) => c.includes('Added model: a') || c.includes('Removed model: a')));
+    // Snapshot persists the map for 304 cycles.
+    const snap = JSON.parse(fs.readFileSync(path.join(d, 'pricing-snapshot.json'), 'utf8'));
+    assert.ok(snap.zenModels && typeof snap.zenModels['zenpaid'] === 'object', 'snapshot must persist zenModels map');
+    assert.ok(snap.freeModels && typeof snap.freeModels['zenfree-free'] === 'object', 'snapshot must still persist freeModels map');
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('zenModels key in prior snapshot never leaks into the Go diff', async () => {
+  const d = tmpDir();
+  try {
+    setup(d);
+    writeSnapshot(d, { a: mk({ input: 1 }), zenModels: { 'zenpaid': mk({ input: 5 }) } });
+    mockFetchWithZen({ a: mk({ input: 1 }) }, { 'zenpaid': mk({ input: 5, output: 9 }) });
+    const r = await runPriceWatch(d);
+    assert.ok(
+      !r.changes.some((c) => c.includes('zenpaid') && (c.includes('Added') || c.includes('Removed'))),
+      'zenModels must never be diffed as Go models, got: ' + JSON.stringify(r.changes)
+    );
+    assert.deepStrictEqual(r.zenModels, ['zenpaid']);
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('304 without zenModels backfills via one etag-less refetch (#98)', async () => {
+  const d = tmpDir();
+  try {
+    setup(d);
+    // Pre-v0.15.1 snapshot: Go model only, no zenModels key. Seed the etag so
+    // the first fetch is a 304.
+    writeSnapshot(d, { a: mk({ input: 1 }) });
+    fs.writeFileSync(path.join(d, '.etag-pricing'), 'W/"old"');
+    let calls = 0;
+    global.fetch = async (url, opts) => {
+      calls += 1;
+      const sentEtag = opts && opts.headers ? opts.headers['If-None-Match'] : null;
+      if (calls === 1) {
+        assert.strictEqual(sentEtag, 'W/"old"', 'first fetch must send the etag');
+        return { status: 304, ok: false, headers: { get: () => null } };
+      }
+      assert.ok(!sentEtag, 'backfill refetch must NOT send If-None-Match, got: ' + sentEtag);
+      return {
+        status: 200,
+        ok: true,
+        headers: { get: () => null },
+        json: async () => ({
+          'opencode-go': { models: { a: mk({ input: 1 }) } },
+          'opencode': { models: { 'zenpaid': mk({ input: 5, output: 9 }) } }
+        })
+      };
+    };
+    const r = await runPriceWatch(d);
+    assert.strictEqual(calls, 2, 'expected 304 + one backfill refetch');
+    assert.strictEqual(r.status, 'ok');
+    assert.deepStrictEqual(r.zenModels, ['zenpaid']);
+    const snap = JSON.parse(fs.readFileSync(path.join(d, 'pricing-snapshot.json'), 'utf8'));
+    assert.ok(snap.zenModels && typeof snap.zenModels['zenpaid'] === 'object', 'backfill must persist zenModels');
+  } finally {
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('304 backfill failure falls back to unchanged with free-only scope (#98)', async () => {
+  const d = tmpDir();
+  try {
+    setup(d);
+    writeSnapshot(d, { a: mk({ input: 1 }), freeModels: { 'zenfree-free': { cost: { input: 0 } } } });
+    fs.writeFileSync(path.join(d, '.etag-pricing'), 'W/"old"');
+    global.fetch = async (url, opts) => {
+      const sentEtag = opts && opts.headers ? opts.headers['If-None-Match'] : null;
+      if (sentEtag) return { status: 304, ok: false, headers: { get: () => null } };
+      throw new Error('offline');
+    };
+    const r = await runPriceWatch(d);
+    assert.strictEqual(r.status, 'unchanged');
+    assert.deepStrictEqual(r.zenModels, [], 'billable set unknown until a full fetch succeeds');
+    assert.deepStrictEqual(r.freeModels, ['zenfree-free'], 'free scope must survive from the snapshot');
   } finally {
     fs.rmSync(d, { recursive: true, force: true });
   }
