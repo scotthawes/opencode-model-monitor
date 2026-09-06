@@ -34,6 +34,9 @@ const DEFAULTS = {
 
 // Loads config.json (if present) merged over built-in defaults.
 // Always returns a fully-populated config object; never throws.
+// v0.20.0 (#112): unknown top-level keys warn (typos no longer silent);
+// numeric thresholds/cadences are clamped to sane ranges; `~` in
+// authJsonPath/scanRoots is expanded to the home directory.
 function loadConfig(configPath) {
   configPath = configPath || path.join(__dirname, '..', 'config.json');
   let userConfig = {};
@@ -54,6 +57,29 @@ function loadConfig(configPath) {
     delivery.webhook = userConfig.delivery.webhook;
   }
 
+  // v0.20.0 (#112): unknown-key validation — warn on typos instead of ignoring.
+  try {
+    const known = new Set(Object.keys(DEFAULTS));
+    for (const k of Object.keys(userConfig)) {
+      if (!known.has(k) && k !== 'webhook') {
+        try { console.warn(`[config] unknown key "${k}" ignored (check spelling)`); } catch (_) {}
+      }
+    }
+  } catch (_) {}
+
+  // v0.20.0 (#112): clamp numeric knobs to sane ranges.
+  function clampNum(v, lo, hi, fallback) {
+    return typeof v === 'number' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback;
+  }
+
+  // v0.20.0 (#112): expand a leading `~` to the home directory.
+  function expandHome(p) {
+    if (typeof p !== 'string') return p;
+    if (p === '~') return os.homedir();
+    if (p.startsWith('~/')) return path.join(os.homedir(), p.slice(2));
+    return p;
+  }
+
   // Environment overrides win over config.json (and defaults).
   if (
     process.env.MODEL_MONITOR_DESKTOP === '1' ||
@@ -67,16 +93,32 @@ function loadConfig(configPath) {
 
   const scanRoots =
     Array.isArray(userConfig.scanRoots) && userConfig.scanRoots.length
-      ? userConfig.scanRoots.map((p) => path.resolve(p))
+      ? userConfig.scanRoots.map((p) => path.resolve(expandHome(p)))
       : DEFAULTS.scanRoots;
 
+  const rawThresholds = Object.assign({}, DEFAULTS.thresholds, userConfig.thresholds || {});
+  const thresholds = {
+    warning: clampNum(rawThresholds.warning, 1, 99, DEFAULTS.thresholds.warning),
+    critical: clampNum(rawThresholds.critical, 1, 100, DEFAULTS.thresholds.critical),
+    quotaDeltaPct: clampNum(rawThresholds.quotaDeltaPct, 0, 100, DEFAULTS.thresholds.quotaDeltaPct)
+  };
+  if (thresholds.critical <= thresholds.warning) thresholds.critical = Math.min(100, thresholds.warning + 1);
+
+  const rawCadence = Object.assign({}, DEFAULTS.cadenceMs, userConfig.cadenceMs || {});
+  const cadenceMs = {};
+  for (const k of Object.keys(DEFAULTS.cadenceMs)) {
+    // Clamp intervals to [10s, 7d] so a typo (0, negative, absurd) can't
+    // tight-loop the daemon or stall it for months.
+    cadenceMs[k] = clampNum(rawCadence[k], 10000, 7 * 24 * 3600 * 1000, DEFAULTS.cadenceMs[k]);
+  }
+
   return {
-    thresholds: Object.assign({}, DEFAULTS.thresholds, userConfig.thresholds || {}),
-    cadenceMs: Object.assign({}, DEFAULTS.cadenceMs, userConfig.cadenceMs || {}),
+    thresholds,
+    cadenceMs,
     delivery,
     scanRoots,
     authJsonPath: userConfig.authJsonPath
-      ? path.resolve(userConfig.authJsonPath)
+      ? path.resolve(expandHome(userConfig.authJsonPath))
       : DEFAULTS.authJsonPath,
     feeds: Object.assign({}, DEFAULTS.feeds, userConfig.feeds || {})
   };

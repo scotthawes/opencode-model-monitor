@@ -65,10 +65,17 @@ test('5-alert cycle performs a single changelog.json rewrite', async () => {
   const dir = makeStateDir();
   quietDelivery(dir);
   const origWrite = fs.writeFileSync;
+  const origRename = fs.renameSync;
   let changelogWrites = 0;
   fs.writeFileSync = function (p, ...rest) {
-    if (String(p).endsWith('changelog.json')) changelogWrites += 1;
+    // v0.20.0 (#112): atomic writes go via changelog.json.tmp + rename — the
+    // tmp write IS the single rewrite; count it alongside direct writes.
+    if (String(p).endsWith('changelog.json') || String(p).endsWith('changelog.json.tmp')) changelogWrites += 1;
     return origWrite.call(this, p, ...rest);
+  };
+  fs.renameSync = function (src, dst, ...rest) {
+    if (String(dst).endsWith('changelog.json')) changelogWrites += 0; // rename not double-counted
+    return origRename.call(this, src, dst, ...rest);
   };
   try {
     delivery.beginChangelogBatch();
@@ -85,6 +92,7 @@ test('5-alert cycle performs a single changelog.json rewrite', async () => {
     assert.strictEqual(persisted[4].title, 'batch probe 4');
   } finally {
     fs.writeFileSync = origWrite;
+    fs.renameSync = origRename;
   }
 });
 

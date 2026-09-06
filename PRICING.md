@@ -20,7 +20,7 @@ machine-readable and human-readable forms.
   - `minimax-m3` → `{input:0.3, output:1.2, cache_read:0.06, ...}`
   - `mimo-v2.5` → `{input:0.14, output:0.28, cache_read:0.0028}`
   - `deepseek-v4-pro` → `{input:0.66, output:1.98, cache_read:0.022}`
-- 31 models listed under `opencode-go`.
+- 35 models listed under `opencode-go` (as of v0.20; count varies — see `state/report.md` for the live count).
 - A parallel `opencode` (Zen) key lists the `-free` models.
 
 ## Secondary: documentation pages (human-readable)

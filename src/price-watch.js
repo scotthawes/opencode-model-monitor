@@ -7,6 +7,8 @@ const changeMetric = require('./change-metric'); // shared Δ% / × / $ formatti
 const usageTable = require('./usage-table'); // effective-price multiplier + seeded caps
 
 const API_URL = 'https://models.opencode.ai/api.json';
+const { fetchWithRetry } = require('./fetch-retry'); // v0.20.0 (#112): retry on 429/5xx
+const { atomicWriteFileSync, atomicWriteJsonSync, readJsonKeepBak, redactUrl } = require('./atomic-write');
 
 // Per-request timeout (15s) so a hung catalog endpoint can't stall the monitor
 // cycle indefinitely — mirrors the caps/catalog/liveness pattern. An abort
@@ -119,9 +121,9 @@ function appendPriceHistory(stateDir, modelsMap) {
 function ensureSnapshotExists(snapFile, message) {
   try {
     if (!fs.existsSync(snapFile)) {
-      fs.writeFileSync(
+      atomicWriteJsonSync(
         snapFile,
-        JSON.stringify({ status: 'unknown', error: String(message && message.message ? message.message : message) }, null, 2)
+        { status: 'unknown', error: String(message && message.message ? message.message : message) }
       );
     }
   } catch (_) {
@@ -314,18 +316,14 @@ function computeCapChanges(prevCaps, modelsMap) {
   return changes;
 }
 
-// Read the persisted previous-cycle cap map (best-effort).
+// Read the persisted previous-cycle cap map (best-effort). v0.20.0 (#112):
+// corrupt file preserved as .bak instead of silently reset.
 function readPrevCaps(stateDir) {
-  try {
-    const raw = fs.readFileSync(path.join(stateDir, CAP_SNAPSHOT_FILE), 'utf8');
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch (_) {
-    return {};
-  }
+  const r = readJsonKeepBak(path.join(stateDir, CAP_SNAPSHOT_FILE), {});
+  return r.data && typeof r.data === 'object' ? r.data : {};
 }
 
-// Persist the current cap map for next cycle's diff (best-effort).
+// Persist the current cap map for next cycle's diff (best-effort, atomic).
 function writeCurrentCaps(stateDir, modelsMap) {
   try {
     const next = {};
@@ -333,7 +331,7 @@ function writeCurrentCaps(stateDir, modelsMap) {
       const entry = modelsMap[id] || {};
       next[id] = entry.usage != null ? entry.usage : usageTable.getUsageCap(id, usageTable.silentLog);
     }
-    fs.writeFileSync(path.join(stateDir, CAP_SNAPSHOT_FILE), JSON.stringify(next));
+    atomicWriteJsonSync(path.join(stateDir, CAP_SNAPSHOT_FILE), next);
   } catch (_) {
     // best effort
   }
@@ -341,8 +339,9 @@ function writeCurrentCaps(stateDir, modelsMap) {
 
 // Detect cap moves for this cycle and deliver them as prioritized model_change
 // alerts. Returns the descriptors (for the report's "Changes detected" list).
-// Never throws.
-function detectCapChanges(stateDir, modelsMap) {
+// Never throws. v0.20.0 (#112): async — the table delivery is awaited so a
+// floating promise can never crash the daemon via unhandledRejection.
+async function detectCapChanges(stateDir, modelsMap) {
   const prev = readPrevCaps(stateDir);
   const changes = computeCapChanges(prev, modelsMap);
   // Always record the current caps first so a future cycle can diff against them,
@@ -350,7 +349,7 @@ function detectCapChanges(stateDir, modelsMap) {
   writeCurrentCaps(stateDir, modelsMap);
   if (changes.length) {
     try {
-      delivery.deliverModelChangeTable(changes);
+      await delivery.deliverModelChangeTable(changes);
     } catch (_) {
       // best effort — never block the rest of the cycle
     }
@@ -377,7 +376,7 @@ async function runPriceWatch(stateDir) {
 
   let res;
   try {
-    res = await fetch(API_URL, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    res = await fetchWithRetry(API_URL, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   } catch (e) {
     delivery.alert('warning', 'Pricing fetch failed', String(e && e.message ? e.message : e), {
       dedupKey: 'pricing:fetch',
@@ -402,7 +401,7 @@ async function runPriceWatch(stateDir) {
        !Array.isArray(snapPeek.zenModels);
       if (!hasZenMap) {
         try {
-          const full = await fetch(API_URL, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+          const full = await fetchWithRetry(API_URL, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
          if (full && full.ok) res = full;
        } catch (_) {
          // fall back to the 304 handling below
@@ -423,7 +422,7 @@ async function runPriceWatch(stateDir) {
         const e = snap[id] || {};
         snapModels[id] = { cost: e.cost || null, tiers: e.tiers || null, meta: e.meta || null, usage: null };
       }
-      const capChanges = detectCapChanges(stateDir, snapModels);
+      const capChanges = await detectCapChanges(stateDir, snapModels);
       const snapFree = snap && typeof snap.freeModels === 'object' && snap.freeModels !== null && !Array.isArray(snap.freeModels)
         ? Object.keys(snap.freeModels)
         : Array.isArray(snap && snap.freeModels)
@@ -445,7 +444,7 @@ async function runPriceWatch(stateDir) {
    }
 
   if (!res.ok) {
-    delivery.alert('warning', `Pricing fetch HTTP ${res.status}`, API_URL, {
+    delivery.alert('warning', `Pricing fetch HTTP ${res.status}`, redactUrl(API_URL), {
       dedupKey: 'pricing:http',
       dedupTtlMs: 3600000
     });
@@ -512,15 +511,29 @@ async function runPriceWatch(stateDir) {
   let prevValid = true;
   let snapExisted = false;
   try {
-    const raw = fs.readFileSync(snapFile, 'utf8');
-    snapExisted = true;
-    const parsed = JSON.parse(raw);
-    if (isValidSnapshot(parsed)) prev = parsed;
-    else prevValid = false; // file exists but shape is unrecognized
+    snapExisted = fs.existsSync(snapFile);
   } catch (_) {
-    // Missing file → first run (empty baseline, normal). A present but corrupt
-    // JSON file → shape unrecognized, so we must NOT blindly trust it.
-    prevValid = !snapExisted;
+    snapExisted = false;
+  }
+  if (snapExisted) {
+    // v0.20.0 (#112): a corrupt snapshot is preserved as .bak (not wiped) so
+    // trends/dedup survive; the cycle treats it as no-diff.
+    const parsed = readJsonKeepBak(snapFile, null);
+    if (parsed.ok && parsed.data && isValidSnapshot(parsed.data)) {
+      prev = parsed.data;
+    } else {
+      if (parsed.corrupt) {
+        delivery.alert(
+          'warning',
+          'Pricing snapshot corrupt — preserved as .bak',
+          'previous snapshot failed to parse; kept as pricing-snapshot.json.bak and treating as no-diff'
+        );
+      }
+      prevValid = false;
+      prev = {};
+    }
+  } else {
+    // Missing file → first run (empty baseline, normal).
     prev = {};
   }
 
@@ -759,6 +772,23 @@ async function runPriceWatch(stateDir) {
     }
   }
 
+  // v0.20.0 (#112): first-run baseline labeling. A fresh clone has no
+  // snapshot, so every model would read as "added" — a scary red flood. Label
+  // it as an info-level baseline instead (not red, not model_change).
+  const isFirstRun = !snapExisted;
+  if (isFirstRun && modelChanges.length) {
+    const n = newIds.size;
+    delivery.alert(
+      'info',
+      'Baseline established',
+      `first run — now tracking ${n} model(s); future cycles will report changes against this baseline`,
+      { noChangelog: false }
+    );
+    changes.length = 0;
+    modelChanges.length = 0;
+    freeChanges.length = 0;
+  }
+
   // --- Quota / usage-cap change detection (v0.10.0, #77) -----------------------
   // Diff each model's cap (seeded usage-table / live api.json `usage`) against the
   // persisted previous snapshot. A downgrade ($60 -> $15) is the user's #1 priority
@@ -766,7 +796,7 @@ async function runPriceWatch(stateDir) {
   // ⚠️ model_change alert that the Discord table + digest rank top. detection is
   // best-effort and never blocks the rest of the cycle. (Delivered inside
   // detectCapChanges; here we only surface the human-readable lines for the report.)
-  const capChanges = detectCapChanges(stateDir, modelsMap);
+  const capChanges = await detectCapChanges(stateDir, modelsMap);
   for (const c of capChanges) changes.push(capChangeText(c));
 
   // v0.8.0 (#73): event-sourced history. Every detected model change is written
@@ -789,8 +819,19 @@ async function runPriceWatch(stateDir) {
     snapshot.freeModels = freeModels;
     snapshot.zenModels = zenBillable;
     snapshot.modelPrivacy = modelPrivacyMap;
-    fs.writeFileSync(snapFile, JSON.stringify(snapshot, null, 2));
-    if (newEtag) fs.writeFileSync(etagFile, newEtag);
+    // v0.20.0 (#112): atomic snapshot + ETag writes (tmp+rename); ENOSPC
+    // raises a critical alert and degrades to read-only.
+    const onEnospc = () => {
+      try {
+        delivery.alert('critical', 'State disk full (ENOSPC)', 'snapshot writes disabled — running read-only until space is freed');
+      } catch (_) {}
+    };
+    if (!atomicWriteJsonSync(snapFile, snapshot, onEnospc)) {
+      if (!require('./atomic-write').isReadOnly()) {
+        delivery.alert('warning', 'Pricing snapshot save failed', 'atomic snapshot write failed');
+      }
+    }
+    if (newEtag) atomicWriteFileSync(etagFile, newEtag, onEnospc);
   } catch (e) {
     delivery.alert('warning', 'Pricing snapshot save failed', String(e && e.message ? e.message : e));
   }
@@ -813,7 +854,8 @@ async function runPriceWatch(stateDir) {
     // `model:` prefix store) so a free-model re-alert within the TTL window is
     // suppressed exactly like a billable change — not just on the opencode-go ids.
     delivery.setKnownModelIds(new Set([...Object.keys(modelsMap), ...Object.keys(freeModels)]));
-    delivery.deliverModelChangeTable(modelChanges);
+    // v0.20.0 (#112): awaited — never a floating promise.
+    await delivery.deliverModelChangeTable(modelChanges);
   }
 
   return {

@@ -15,6 +15,9 @@ watch, e.g. Atom/RSS via a reader or cron). "Verified" means curl-tested live.
 | 5 | **Usage / quota / allowance (server-enforced, authoritative)** | `GET https://opencode.ai/zen/go/v1/usage` (header `Authorization: Bearer <opencode-go key>`) | poll | JSON | Bearer key (from `~/.local/share/opencode/auth.json`) | ~5 min (cache) | ✅ route live (401 unauth → 200 authed) |
 | 6 | Model availability / liveness | `GET https://opencode.ai/zen/go/v1/models` | poll | JSON (model IDs) | none | 15–60 min | ✅ 200 |
 | 7 | New-model / release announcements | `https://github.com/anomalyco/opencode/releases.atom` | subscribe (feed-poll) | Atom | none | daily | ✅ 200 |
+| 8 | Tracker repo commits (free/usage-moved/privacy/info events invisible live) | `https://github.com/all-the-rest/ocgo-price-tracker/commits/main.atom` | subscribe (feed-poll) | Atom | none | 6h | ✅ 200 |
+| 9 | Live usage caps per model | `https://ocgo-pricing.all-the.rest/data/latest.json` | poll (ETag → 304) | JSON | none | 30 min | ✅ 200 |
+| 10 | Zen model availability / liveness | `GET https://opencode.ai/zen/v1/models` | poll | JSON (model IDs) | optional Bearer | 30 min | ✅ 200 |
 
 ### Notes on the key external feeds
 
@@ -54,7 +57,7 @@ watch, e.g. Atom/RSS via a reader or cron). "Verified" means curl-tested live.
 | 9 | Agent model pins (config) | all `.opencode/opencode.json` (global + every project) → `agent.<name>.model` | filesystem watch (fswatch/inotify) or scan | JSON | on change / 15 min | ✅ dirs exist |
 | 10 | Budget policy / allowance definition | `~/.config/opencode/budget.json` (plan, caps, free-tier fallback, thresholds) | filesystem watch | JSON | on change | to be created |
 | 11 | Usage API key | `~/.local/share/opencode/auth.json` → `opencode-go` | read at startup + watch | JSON | on change | ✅ present |
-| 12 | Monitor output (alerts / reports) | log file (`~/.local/share/model-budget-guard/alerts.log`), desktop notification (`node-notifier`), and/or report file (`report.json` / `report.md`) | write | file / notification | realtime | bundled with project |
+| 12 | Monitor output (alerts / reports) | log file (`state/alerts.log`), desktop notification (`node-notifier`), and/or report file (`state/report.json` / `state/report.md`) | write | file / notification | realtime | bundled with project |
 
 ## Gaps / non-feeds
 

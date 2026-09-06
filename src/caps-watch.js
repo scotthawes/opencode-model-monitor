@@ -30,6 +30,8 @@ const fs = require('fs');
 const path = require('path');
 const delivery = require('./delivery');
 const usageTable = require('./usage-table');
+const { fetchWithRetry } = require('./fetch-retry'); // v0.20.0 (#112)
+const { atomicWriteFileSync, atomicWriteJsonSync, redactUrl } = require('./atomic-write');
 
 const CAPS_URL = 'https://ocgo-pricing.all-the.rest/data/latest.json';
 const TIMEOUT_MS = 15000;
@@ -191,7 +193,7 @@ async function runCapsWatch(stateDir, opts) {
 
     let res;
     try {
-      res = await fetch(CAPS_URL, {
+      res = await fetchWithRetry(CAPS_URL, {
         headers,
         signal: AbortSignal.timeout(TIMEOUT_MS)
       });
@@ -209,7 +211,7 @@ async function runCapsWatch(stateDir, opts) {
     }
 
     if (!res.ok) {
-      delivery.alert('warning', `Caps fetch HTTP ${res.status}`, CAPS_URL, {
+      delivery.alert('warning', `Caps fetch HTTP ${res.status}`, redactUrl(CAPS_URL), {
         dedupKey: 'caps:http',
         dedupTtlMs: WARN_TTL_MS
       });
@@ -282,7 +284,8 @@ async function runCapsWatch(stateDir, opts) {
     };
 
     try {
-      fs.writeFileSync(tablePath, JSON.stringify(doc, null, 2) + '\n');
+      // v0.20.0 (#112): atomic table write (tmp+rename).
+      atomicWriteFileSync(tablePath, JSON.stringify(doc, null, 2) + '\n');
     } catch (e) {
       delivery.alert('warning', 'Caps table save failed', String((e && e.message) || e), {
         dedupKey: 'caps:save',
@@ -305,7 +308,7 @@ async function runCapsWatch(stateDir, opts) {
 
     try {
       const newEtag = res.headers && res.headers.get ? res.headers.get('etag') : null;
-      if (newEtag) fs.writeFileSync(etagFile, newEtag);
+      if (newEtag) atomicWriteFileSync(etagFile, newEtag);
     } catch (_) {}
 
     try {

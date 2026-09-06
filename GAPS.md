@@ -102,7 +102,7 @@ hardening.
 `pricing-snapshot.json` now carries `meta` per model (capabilities, context
 window `limit`, provider npm, open_weights, knowledge) parsed from `api.json`.
 Two fields are **not** available in `api.json` and are intentionally out of scope
-for the v0.5.x cycle so the monitor never blocks on an external scrape:
+for the current cycle (see #102) so the monitor never blocks on an external scrape:
 
 - **privacy** (e.g. training-data / zero-retention guarantees)
 - **training** data cutoff beyond the coarse `knowledge` date

@@ -18,6 +18,8 @@
 const fs = require('fs');
 const path = require('path');
 const delivery = require('./delivery');
+const { fetchWithRetry } = require('./fetch-retry'); // v0.20.0 (#112)
+const { atomicWriteFileSync, atomicWriteJsonSync, readJsonKeepBak, redactUrl } = require('./atomic-write');
 
 const CATALOG_URL = 'https://models.opencode.ai/catalog.json';
 const TIMEOUT_MS = 15000;
@@ -114,7 +116,7 @@ async function runCatalogWatch(stateDir, opts) {
 
   let res;
   try {
-    res = await fetch(CATALOG_URL, {
+    res = await fetchWithRetry(CATALOG_URL, {
       headers,
       signal: AbortSignal.timeout(TIMEOUT_MS)
     });
@@ -133,7 +135,7 @@ async function runCatalogWatch(stateDir, opts) {
   }
 
   if (!res.ok) {
-    delivery.alert('warning', `Catalog HTTP ${res.status}`, CATALOG_URL, {
+    delivery.alert('warning', `Catalog HTTP ${res.status}`, redactUrl(CATALOG_URL), {
       dedupKey: 'catalog:http',
       dedupTtlMs: 3600000
     });
@@ -187,7 +189,8 @@ async function runCatalogWatch(stateDir, opts) {
   }
 
   // Deprecated cross-check against the previously persisted snapshot.
-  let prev = readJsonFile(snapFile);
+  // v0.20.0 (#112): corrupt snapshot preserved as .bak instead of reset.
+  let prev = readJsonKeepBak(snapFile, null).data;
   const prevValid = prev && typeof prev === 'object' && !Array.isArray(prev);
   const prevMap = prevValid ? prev : {};
   const depChanges = prevValid ? computeDeprecatedChanges(prevMap, modelsMap) : [];
@@ -197,9 +200,10 @@ async function runCatalogWatch(stateDir, opts) {
   }
 
   try {
-    fs.writeFileSync(snapFile, JSON.stringify(modelsMap, null, 2));
+    // v0.20.0 (#112): atomic snapshot + ETag writes.
+    atomicWriteJsonSync(snapFile, modelsMap);
     const newEtag = res.headers && res.headers.get ? res.headers.get('etag') : null;
-    if (newEtag) fs.writeFileSync(etagFile, newEtag);
+    if (newEtag) atomicWriteFileSync(etagFile, newEtag);
   } catch (e) {
     delivery.alert('warning', 'Catalog snapshot save failed', String((e && e.message) || e));
   }
