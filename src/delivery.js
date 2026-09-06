@@ -45,9 +45,74 @@ let dedupTtlMs = 86400000;
 // than this are pruned so the report only shows recent, recallable changes.
 let changelogRetentionMs = 7 * 24 * 60 * 60 * 1000;
 
+// Max entries kept in the persisted changelog JSON (oldest dropped first).
+const CHANGELOG_MAX_ENTRIES = 500;
+
+// --- Per-cycle changelog batching (v0.16.0, #103) ---------------------------
+//
+// alert() used to do a full read-modify-write of changelog.json per alert, so
+// a 5-model-change cycle paid 5 synchronous rewrites. In batch mode the JSON
+// entries are collected in memory and persisted with a SINGLE read-modify-write
+// at the end of the cycle (endChangelogBatch, called before writeReport so the
+// report still sees this cycle's entries). The append-only changelog.log line
+// stays immediate (cheap append, no read). Cap semantics are unchanged: the
+// same 7-day prune + 500-entry cap apply to the merged array, and entry order
+// + per-alert timestamps are preserved (captured at alert time).
+// Outside a batch (one-shot scripts, continuous intervals) alert() writes
+// through immediately, exactly as before.
+let changelogBatch = null; // null = immediate mode; array = collecting
+
+function beginChangelogBatch() {
+  changelogBatch = [];
+}
+
+// Single read-modify-write of changelog.json appending `entries` (in order).
+// No-op when entries is empty (an unchanged cycle performs zero rewrites).
+// Best-effort, never throws.
+function writeChangelogEntries(entries) {
+  if (!entries || !entries.length) return;
+  try {
+    let arr = [];
+    try {
+      const raw = fs.readFileSync(path.join(STATE_DIR, 'changelog.json'), 'utf8');
+      arr = JSON.parse(raw);
+      if (!Array.isArray(arr)) arr = [];
+    } catch (_) {
+      arr = [];
+    }
+    for (const e of entries) arr.push(e);
+    const cutoff = Date.now() - changelogRetentionMs;
+    arr = arr.filter((e) => (e.ts ? Date.parse(e.ts) : 0) >= cutoff);
+    if (arr.length > CHANGELOG_MAX_ENTRIES) arr = arr.slice(arr.length - CHANGELOG_MAX_ENTRIES);
+    fs.writeFileSync(path.join(STATE_DIR, 'changelog.json'), JSON.stringify(arr, null, 2));
+    invalidateCycleCache();
+  } catch (_) {
+    // best effort
+  }
+}
+
+function appendChangelog(entry) {
+  if (changelogBatch) {
+    changelogBatch.push(entry);
+    return;
+  }
+  writeChangelogEntries([entry]);
+}
+
+// Flush a pending batch with a single rewrite. Returns the number of entries
+// persisted. Safe to call with no active batch (no-op). Never throws.
+function endChangelogBatch() {
+  const pending = changelogBatch || [];
+  changelogBatch = null;
+  writeChangelogEntries(pending);
+  return pending.length;
+}
+
 // Fixed 7-day window used for quota-movement and projection math. Intentionally
 // hardcoded (not config) to match changelogRetentionDays' default semantics.
-const SEVEN_DAY_MS = 7 * 24 * 3600 * 1000;
+// v0.16.0 (#103): single window constant lives in change-metric.js; this alias
+// keeps existing references working.
+const SEVEN_DAY_MS = changeMetric.QUOTA_WINDOW_MS;
 // Small grace so a sample sitting right on the 7-day boundary (e.g. captured
 // exactly 7 days ago) is still counted as "within 7 days" despite clock drift
 // between when `now` is sampled and when the report is generated.
@@ -235,6 +300,12 @@ function backfillFromAlertsLog(base) {
 // Initialize the persistent dedup store. Called by monitor at the start of
 // each cycle (or once before a single run) with the state directory and opts.
 function init(stateDir, opts) {
+  // A leftover batch from a previous cycle (e.g. a crashed run that never
+  // flushed) is persisted first so no collected entry is silently dropped.
+  try {
+    endChangelogBatch();
+  } catch (_) {}
+  clearCycleCache();
   if (stateDir) {
     DEDUP_DIR = stateDir;
     STATE_DIR = stateDir;
@@ -530,6 +601,10 @@ async function postToWebhook(url, payload) {
 // Wait for all in-flight delivery promises to settle. Safe to call multiple
 // times; resolves once nothing is pending.
 async function flush() {
+  // Persist any batched changelog entries first so a shutdown never drops them.
+  try {
+    endChangelogBatch();
+  } catch (_) {}
   await Promise.allSettled([...inFlight]);
 }
 
@@ -776,29 +851,15 @@ async function alert(level, title, message, opts) {
   // array. Only fires for alerts that passed the dedup early-return above, so
   // suppressed/duplicate model_change alerts are NOT recorded. Best-effort.
   // Lifecycle heartbeats pass opts.noChangelog to stay out of the changelog.
+  // v0.16.0 (#103): the JSON array is batched per-cycle (single rewrite) while
+  // the log line stays an immediate append.
   if (!(opts && opts.noChangelog)) {
     try {
       fs.appendFileSync(path.join(STATE_DIR, 'changelog.log'), line + '\n');
     } catch (_) {
       // best effort
     }
-    try {
-      let arr = [];
-      try {
-        const raw = fs.readFileSync(path.join(STATE_DIR, 'changelog.json'), 'utf8');
-        arr = JSON.parse(raw);
-        if (!Array.isArray(arr)) arr = [];
-      } catch (_) {
-        arr = [];
-      }
-      arr.push({ ts: ts(), level, title, message });
-      const cutoff = Date.now() - changelogRetentionMs;
-      arr = arr.filter((e) => (e.ts ? Date.parse(e.ts) : 0) >= cutoff);
-      if (arr.length > 500) arr = arr.slice(arr.length - 500);
-      fs.writeFileSync(path.join(STATE_DIR, 'changelog.json'), JSON.stringify(arr, null, 2));
-    } catch (_) {
-      // best effort
-    }
+    appendChangelog({ ts: ts(), level, title, message });
   }
 
   if (CONFIG.desktop) {
@@ -902,28 +963,71 @@ async function alert(level, title, message, opts) {
   return { delivered: true };
 }
 
-// Best-effort read of the usage time-series from STATE_DIR. Returns the array of
-// samples (or [] if missing/corrupt). Never throws.
-function readUsageHistory() {
+// --- Per-cycle parse cache (v0.16.0, #103) -----------------------------------
+//
+// renderMarkdown + reportSummary + the digest each re-parsed usage-history.json,
+// history.json and changelog.json several times per cycle (4x + 1x + 3x). These
+// readers now cache the parsed array, validated by file mtime+size so any write
+// (including our own batched changelog flush) transparently re-parses on the
+// next read. init() starts a fresh cache each cycle. Outputs are identical: the
+// same parse result is simply reused instead of re-read from disk.
+let cycleCache = null; // null = parse-through (legacy); object = enabled
+
+function beginCycleCache() {
+  cycleCache = {};
+}
+
+function clearCycleCache() {
+  cycleCache = null;
+}
+
+function invalidateCycleCache() {
+  if (cycleCache) cycleCache = {};
+}
+
+// Best-effort cached parse of a JSON-array state file. Returns the array (or
+// [] when missing/corrupt/non-array — exactly the legacy semantics). Never throws.
+function cachedJsonArray(fileName) {
+  const file = path.join(STATE_DIR, fileName);
+  if (cycleCache) {
+    try {
+      const st = fs.statSync(file);
+      const hit = cycleCache[fileName];
+      if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.data;
+      const raw = fs.readFileSync(file, 'utf8');
+      const parsed = JSON.parse(raw);
+      const data = Array.isArray(parsed) ? parsed : [];
+      cycleCache[fileName] = { mtimeMs: st.mtimeMs, size: st.size, data };
+      return data;
+    } catch (_) {
+      // Missing/corrupt file (or stat race): fall through to legacy behavior.
+    }
+  }
   try {
-    const raw = fs.readFileSync(path.join(STATE_DIR, 'usage-history.json'), 'utf8');
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : [];
+    const raw = fs.readFileSync(file, 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
   } catch (_) {
     return [];
   }
 }
 
+// Best-effort read of the usage time-series from STATE_DIR. Returns the array of
+// samples (or [] if missing/corrupt). Never throws.
+function readUsageHistory() {
+  return cachedJsonArray('usage-history.json');
+}
+
 // Best-effort read of the persisted pricing time-series (history.json) from
 // STATE_DIR. Returns the array of samples (or [] if missing/corrupt). Never throws.
 function readPriceHistory() {
-  try {
-    const raw = fs.readFileSync(path.join(STATE_DIR, 'history.json'), 'utf8');
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : [];
-  } catch (_) {
-    return [];
-  }
+  return cachedJsonArray('history.json');
+}
+
+// Best-effort read of the persisted changelog array from STATE_DIR. Returns the
+// array of events (or [] if missing/corrupt). Never throws.
+function readChangelog() {
+  return cachedJsonArray('changelog.json');
 }
 
 // Compute 7-day quota movement for a single window from the time-series.
@@ -982,8 +1086,7 @@ function reportSummary(report) {
 
   let events = [];
   try {
-    const raw = fs.readFileSync(path.join(STATE_DIR, 'changelog.json'), 'utf8');
-    const arr = JSON.parse(raw);
+    const arr = readChangelog();
     const cutoff = Date.now() - changelogRetentionMs;
     if (Array.isArray(arr)) events = arr.filter((e) => (e.ts ? Date.parse(e.ts) : 0) >= cutoff);
   } catch (_) {}
@@ -1239,8 +1342,7 @@ function renderMarkdown(report) {
   lines.push('**Events**:');
   lines.push('');
   try {
-    const raw = fs.readFileSync(path.join(STATE_DIR, 'changelog.json'), 'utf8');
-    const arr = JSON.parse(raw);
+    const arr = readChangelog();
     const cutoff = now - changelogRetentionMs;
     const within = Array.isArray(arr)
       ? arr.filter((e) => (e.ts ? Date.parse(e.ts) : 0) >= cutoff)
@@ -1285,17 +1387,14 @@ function renderMarkdown(report) {
       lines.push(`- ${win} projection: n/a`);
       continue;
     }
-    const { current, delta, daysElapsed } = wi;
-    const rate = daysElapsed > 0 ? delta / daysElapsed : 0;
-    if (rate <= 0) {
+    const proj = changeMetric.projectThresholds(wi, now);
+    if (!proj) {
       lines.push(`- ${win} projection: stable (no increase detected)`);
-    } else if (current >= 80) {
+    } else if (proj.daysToWarn === 0) {
       lines.push(`- ${win}: already at/above warn threshold`);
     } else {
-      const daysToWarn = (80 - current) / rate;
-      const daysToCrit = (95 - current) / rate;
-      const warnDate = new Date(now + daysToWarn * 864e5).toISOString().slice(0, 10);
-      const critDate = new Date(now + daysToCrit * 864e5).toISOString().slice(0, 10);
+      const warnDate = changeMetric.thresholdDateIso(now, proj.daysToWarn);
+      const critDate = changeMetric.thresholdDateIso(now, proj.daysToCrit);
       lines.push(
         `- ${win} projection: ~80% warn on ${warnDate}, ~95% crit on ${critDate}`
       );
@@ -1875,6 +1974,11 @@ module.exports = {
   getStateDir,
   readUsageHistory,
   readPriceHistory,
+  readChangelog,
+  beginChangelogBatch,
+  endChangelogBatch,
+  beginCycleCache,
+  clearCycleCache,
   windowInfo,
   deliverModelChangeTable,
   buildModelChangeChunks,

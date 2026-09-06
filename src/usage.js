@@ -6,6 +6,11 @@ const delivery = require('./delivery');
 
 const USAGE_URL = 'https://opencode.ai/zen/go/v1/usage';
 
+// Per-request timeout (15s) so a hung quota endpoint can't stall the monitor
+// cycle indefinitely — mirrors the caps/catalog/liveness pattern. An abort
+// surfaces as a fetch rejection handled below (warning, never throw).
+const FETCH_TIMEOUT_MS = 15000;
+
 // Reads the opencode-go API key from auth.json (defensively), then polls the
 // server-enforced usage/quota endpoint. Returns { status, usage, error }.
 // stateDir: directory where per-window quota history is persisted so we can
@@ -84,7 +89,10 @@ async function runUsage(authJsonPath, thresholds, stateDir) {
 
   let res;
   try {
-    res = await fetch(USAGE_URL, { headers: { Authorization: 'Bearer ' + key } });
+    res = await fetch(USAGE_URL, {
+      headers: { Authorization: 'Bearer ' + key },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+    });
   } catch (e) {
     delivery.alert('warning', 'Usage fetch failed', String(e && e.message ? e.message : e), {
       dedupKey: 'usage:fetch',

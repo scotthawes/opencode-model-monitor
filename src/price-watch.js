@@ -9,6 +9,11 @@ const usageTable = require('./usage-table'); // effective-price multiplier + see
 
 const API_URL = 'https://models.opencode.ai/api.json';
 
+// Per-request timeout (15s) so a hung catalog endpoint can't stall the monitor
+// cycle indefinitely — mirrors the caps/catalog/liveness pattern. An abort
+// surfaces as a fetch rejection handled below (warning, never throw).
+const FETCH_TIMEOUT_MS = 15000;
+
 // --- P2-2 (#55): zod-style validation of api.json shape drift -----------------
 //
 // Hand-rolled schema check (no new deps) that fails closed on a malformed
@@ -373,7 +378,7 @@ async function runPriceWatch(stateDir) {
 
   let res;
   try {
-    res = await fetch(API_URL, { headers });
+    res = await fetch(API_URL, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   } catch (e) {
     delivery.alert('warning', 'Pricing fetch failed', String(e && e.message ? e.message : e), {
       dedupKey: 'pricing:fetch',
@@ -396,9 +401,9 @@ async function runPriceWatch(stateDir) {
        typeof snapPeek.zenModels === 'object' &&
        snapPeek.zenModels !== null &&
        !Array.isArray(snapPeek.zenModels);
-     if (!hasZenMap) {
-       try {
-         const full = await fetch(API_URL, {});
+      if (!hasZenMap) {
+        try {
+          const full = await fetch(API_URL, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
          if (full && full.ok) res = full;
        } catch (_) {
          // fall back to the 304 handling below
