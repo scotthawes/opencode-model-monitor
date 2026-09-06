@@ -145,6 +145,251 @@ function projectThresholds(wi, nowMs) {
   return { daysToWarn, daysToCrit, rate };
 }
 
+// --- v0.17 insight helpers (#105) ------------------------------------------------
+// All pure, dependency-free, never throw. Shared by price-watch (anomaly + meta
+// diffs), delivery/report (burn-rate block), digest + page (arrows + cap-upset).
+
+// Sudden-jump anomaly: a single-poll move is anomalous when the multiplier is
+// >=2x (up) or the absolute percent swing is >=50% (either direction — a 0.125x
+// collapse reads as -87.5%). "new" (old 0) and non-comparable pairs are never
+// anomalous. Pure, never throws.
+const ANOMALY_MULT = 2;
+const ANOMALY_PCT = 50;
+
+function isAnomalousMove(oldV, newV) {
+  try {
+    const parts = changeParts(oldV, newV);
+    if (!parts || parts.isNew) return false;
+    if (parts.mult != null && parts.mult >= ANOMALY_MULT) return true;
+    if (parts.pct != null && Math.abs(parts.pct) >= ANOMALY_PCT) return true;
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
+// Pick the (old, new) pair an anomaly check applies to: prefer the output
+// $/1M (the page headline metric), fall back to input when output is absent.
+// Returns null when neither side is a comparable number pair.
+function anomalyPair(oldCost, newCost) {
+  try {
+    const o = oldCost && typeof oldCost === 'object' ? oldCost : {};
+    const n = newCost && typeof newCost === 'object' ? newCost : {};
+    const useOutput = typeof o.output === 'number' || typeof n.output === 'number';
+    const key = useOutput ? 'output' : 'input';
+    if (typeof o[key] !== 'number' || typeof n[key] !== 'number') return null;
+    return { key, old: o[key], new: n[key] };
+  } catch (_) {
+    return null;
+  }
+}
+
+// One-line warning text for an anomalous move (or null when not anomalous).
+//   "Anomaly: <id> moved 8x between polls (output $0.0725→$0.58 +700%)"
+function anomalyText(model, oldCost, newCost) {
+  try {
+    const pair = anomalyPair(oldCost, newCost);
+    if (!pair) return null;
+    if (!isAnomalousMove(pair.old, pair.new)) return null;
+    const parts = changeParts(pair.old, pair.new);
+    const mult = parts && parts.mult != null ? Math.round(parts.mult * 100) / 100 + 'x' : '?';
+    const metric = fmtChangeMetric(pair.old, pair.new);
+    return `Anomaly: ${model} moved ${mult} between polls (${pair.key} $${trimNum(pair.old)}→$${trimNum(pair.new)}${metric ? ' ' + metric : ''})`;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Burn-rate projection for one quota window from a windowInfo-shaped input
+// ({ current, delta, daysElapsed }) plus the window's resetsAt ISO string.
+// Returns null when unprojectable; otherwise
+//   { ratePerDay, daysToCrit, critDateIso, resetsAt, exhaustsBeforeReset }.
+// exhaustsBeforeReset is true when the linear ~95% crossing lands strictly
+// before the known reset (the budget runs out mid-cycle). Pure, never throws.
+function burnRateInfo(wi, resetsAtIso, nowMs) {
+  try {
+    if (!wi || typeof wi.current !== 'number' || typeof wi.delta !== 'number') return null;
+    const now = nowMs != null ? nowMs : Date.now();
+    const rate = wi.daysElapsed > 0 ? wi.delta / wi.daysElapsed : 0;
+    if (!(rate > 0)) return null;
+    const daysToCrit = daysToThreshold(wi.current, rate, CRIT_THRESHOLD);
+    if (daysToCrit == null) return null;
+    const critDateIso = thresholdDateIso(now, daysToCrit);
+    let exhaustsBeforeReset = null;
+    const resetMs = resetsAtIso != null ? Date.parse(resetsAtIso) : NaN;
+    if (!isNaN(resetMs)) {
+      exhaustsBeforeReset = now + daysToCrit * 864e5 < resetMs;
+    }
+    return { ratePerDay: rate, daysToCrit, critDateIso, resetsAt: resetsAtIso || null, exhaustsBeforeReset };
+  } catch (_) {
+    return null;
+  }
+}
+
+// Acceleration alarm: compares the last-24h burn rate against the prior-7d
+// baseline rate for one usage window. `history` is an array of { ts, [win] }
+// samples (ms epoch ts, numeric percents). Returns
+//   { recentRate, baseRate, ratio } when recent >= threshold x baseline,
+// otherwise null. A non-positive baseline still alarms when the last 24h moved
+// materially (>=2pts) so a flat-then-spike week is not missed. Pure, never throws.
+const ACCEL_WINDOW_MS = 24 * 3600 * 1000;
+const ACCEL_THRESHOLD = 2;
+const ACCEL_MIN_DELTA = 2;
+
+function accelerationAlarm(history, win, nowMs, threshold) {
+  try {
+    const now = nowMs != null ? nowMs : Date.now();
+    const thr = typeof threshold === 'number' && threshold > 0 ? threshold : ACCEL_THRESHOLD;
+    const arr = Array.isArray(history) ? history : [];
+    const valAtOrBefore = (t) => {
+      let best = null;
+      for (const s of arr) {
+        if (s && typeof s.ts === 'number' && typeof s[win] === 'number' && s.ts <= t) {
+          if (!best || s.ts > best.ts) best = s;
+        }
+      }
+      return best;
+    };
+    const cur = arr.length ? arr[arr.length - 1] : null;
+    const curVal = cur && typeof cur[win] === 'number' ? cur[win] : null;
+    if (curVal == null) return null;
+    const dayAgo = valAtOrBefore(now - ACCEL_WINDOW_MS);
+    const weekAgo = valAtOrBefore(now - QUOTA_WINDOW_MS);
+    if (!dayAgo || dayAgo.ts === cur.ts) return null;
+    const recentDays = Math.max((now - dayAgo.ts) / 864e5, 1 / 24);
+    const recentRate = (curVal - dayAgo[win]) / recentDays;
+    if (!(recentRate > 0)) return null;
+    let baseRate = 0;
+    if (weekAgo && weekAgo.ts < dayAgo.ts && typeof weekAgo[win] === 'number') {
+      const baseDays = Math.max((dayAgo.ts - weekAgo.ts) / 864e5, 1 / 24);
+      baseRate = (dayAgo[win] - weekAgo[win]) / baseDays;
+    }
+    if (baseRate > 0) {
+      const ratio = recentRate / baseRate;
+      return ratio >= thr ? { recentRate, baseRate, ratio } : null;
+    }
+    // Flat/declining baseline: alarm only on a material 24h jump.
+    if (curVal - dayAgo[win] >= ACCEL_MIN_DELTA) {
+      return { recentRate, baseRate, ratio: Infinity };
+    }
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Leaderboard rank arrows: compare current rank order against the 7d-ago rank
+// order. Both args are arrays of model ids in rank order (cheapest first).
+// Returns { [id]: { arrow: '▲'|'▼'|'–', pastRank, rank } }. New/unranked ids
+// get '–' with a null pastRank. Pure, never throws.
+function rankArrows(rankNow, rankPast) {
+  try {
+    const now = Array.isArray(rankNow) ? rankNow : [];
+    const past = Array.isArray(rankPast) ? rankPast : [];
+    const pastPos = {};
+    past.forEach((id, i) => {
+      if (!(id in pastPos)) pastPos[id] = i + 1;
+    });
+    const out = {};
+    now.forEach((id, i) => {
+      const rank = i + 1;
+      const pr = pastPos[id] != null ? pastPos[id] : null;
+      let arrow = '–';
+      if (pr != null) {
+        if (pr > rank) arrow = '▲';
+        else if (pr < rank) arrow = '▼';
+      }
+      out[id] = { arrow, pastRank: pr, rank };
+    });
+    return out;
+  } catch (_) {
+    return {};
+  }
+}
+
+// Cap-upset flag: models that look cheap on LIST price but are expensive
+// effectively because they sit on a high-multiplier (default $15 → 4x) cap.
+// `rawOrder`/`effOrder` are id arrays ranked cheapest-first by raw list cost
+// and by effective cost; `capOf` maps id -> numeric cap. Flags ids with
+// rawRank <= topN whose effective rank trails by >= minGap AND whose cap is in
+// upsetCaps. Returns [{ id, rawRank, effRank, cap, gap }]. Pure, never throws.
+function capUpsets(rawOrder, effOrder, capOf, opts) {
+  try {
+    const o = opts || {};
+    const topN = typeof o.topN === 'number' ? o.topN : 10;
+    const minGap = typeof o.minGap === 'number' ? o.minGap : 5;
+    const upsetCaps = Array.isArray(o.upsetCaps) ? o.upsetCaps : [15];
+    const raw = Array.isArray(rawOrder) ? rawOrder : [];
+    const eff = Array.isArray(effOrder) ? effOrder : [];
+    const effPos = {};
+    eff.forEach((id, i) => {
+      if (!(id in effPos)) effPos[id] = i + 1;
+    });
+    const out = [];
+    raw.slice(0, topN).forEach((id, i) => {
+      const rawRank = i + 1;
+      const effRank = effPos[id];
+      if (effRank == null) return;
+      const cap = capOf ? capOf[id] : null;
+      if (!upsetCaps.includes(cap)) return;
+      const gap = effRank - rawRank;
+      if (gap >= minGap) out.push({ id, rawRank, effRank, cap, gap });
+    });
+    return out;
+  } catch (_) {
+    return [];
+  }
+}
+
+// Meta fields whose silent moves are user-visible (cost unchanged): provider
+// family rename, knowledge cutoff refresh, open-weights flip, context-window
+// resize. capabilities/description churn is intentionally excluded (noisy).
+const META_DIFF_FIELDS = ['family', 'knowledge', 'open_weights', 'contextWindow'];
+
+// Pure: list { field, old, new } moves between two extractModelMeta-shaped
+// objects. JSON-compare per field so objects (knowledge) compare by value.
+// Returns [] when nothing tracked moved. Never throws.
+function diffMeta(prevMeta, currMeta) {
+  try {
+    const a = prevMeta && typeof prevMeta === 'object' ? prevMeta : {};
+    const b = currMeta && typeof currMeta === 'object' ? currMeta : {};
+    const out = [];
+    for (const f of META_DIFF_FIELDS) {
+      const sa = JSON.stringify(a[f] == null ? null : a[f]);
+      const sb = JSON.stringify(b[f] == null ? null : b[f]);
+      if (sa !== sb) out.push({ field: f, old: a[f] == null ? null : a[f], new: b[f] == null ? null : b[f] });
+    }
+    return out;
+  } catch (_) {
+    return [];
+  }
+}
+
+function fmtMetaVal(v) {
+  if (v == null) return '?';
+  if (typeof v === 'object') {
+    try {
+      return JSON.stringify(v);
+    } catch (_) {
+      return '?';
+    }
+  }
+  return String(v);
+}
+
+// One-line info text for a meta move (or null when nothing tracked moved).
+//   "Meta changed for <id>: family A→B"
+function metaChangeText(model, prevMeta, currMeta) {
+  try {
+    const diffs = diffMeta(prevMeta, currMeta);
+    if (!diffs.length) return null;
+    const bits = diffs.map((d) => `${d.field} ${fmtMetaVal(d.old)}→${fmtMetaVal(d.new)}`);
+    return `Meta changed for ${model}: ${bits.join('; ')}`;
+  } catch (_) {
+    return null;
+  }
+}
+
 module.exports = {
   changeParts,
   fmtPct,
@@ -161,5 +406,20 @@ module.exports = {
   daysToThreshold,
   thresholdDateIso,
   humanDate,
-  projectThresholds
+  projectThresholds,
+  ANOMALY_MULT,
+  ANOMALY_PCT,
+  isAnomalousMove,
+  anomalyPair,
+  anomalyText,
+  burnRateInfo,
+  ACCEL_WINDOW_MS,
+  ACCEL_THRESHOLD,
+  ACCEL_MIN_DELTA,
+  accelerationAlarm,
+  rankArrows,
+  capUpsets,
+  META_DIFF_FIELDS,
+  diffMeta,
+  metaChangeText
 };

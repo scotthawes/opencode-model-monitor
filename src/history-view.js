@@ -490,6 +490,50 @@ function buildPricingData(history, pricingMap, opts) {
       effective: r.effective,
       requestsPerMo: r.requestsPerMo
     }));
+  // v0.17 (#105): leaderboard rank arrows (rank now vs rank 7d ago) + $15-cap
+  // upset flags. The past cost per model is its latest series point at/before
+  // now-7d (falling back to its earliest point); models with no past data keep
+  // '–'. Best-effort: any failure leaves arrows neutral, never breaks the page.
+  try {
+    const SEVEN_D = 7 * 864e5;
+    const pastLbModels = {};
+    for (const id of Object.keys(lbModels)) {
+      const series = seriesMap[id] || [];
+      let past = null;
+      for (const p of series) {
+        if (p.t <= now - SEVEN_D) past = p;
+        else break;
+      }
+      if (!past) past = series[0] || null;
+      const c = past || { output: null, input: null, cache_read: null, cache_write: null };
+      pastLbModels[id] = {
+        cost: { output: c.output, input: c.input, cache_read: c.cache_read, cache_write: c.cache_write }
+      };
+    }
+    const nowOrder = calc.leaderboard(lbModels, calc.DEFAULT_PATTERN).map((r) => r.id);
+    const pastOrder = calc.leaderboard(pastLbModels, calc.DEFAULT_PATTERN).map((r) => r.id);
+    const arrows = changeMetric.rankArrows(nowOrder, pastOrder);
+    const rawOrder = Object.keys(lbModels)
+      .map((id) => ({ id, raw: calc.costPerRequest(lbModels[id].cost) }))
+      .filter((r) => r.raw != null && isFinite(r.raw) && r.raw > 0)
+      .sort((a, b) => a.raw - b.raw)
+      .map((r) => r.id);
+    const capOf = {};
+    for (const m of models) capOf[m.id] = m.cap;
+    const upsetIds = new Set(changeMetric.capUpsets(rawOrder, nowOrder, capOf).map((u) => u.id));
+    for (const r of leaderboard) {
+      const a = arrows[r.id];
+      r.arrow = a ? a.arrow : '–';
+      r.pastRank = a ? a.pastRank : null;
+      r.upset = upsetIds.has(r.id);
+    }
+  } catch (_) {
+    for (const r of leaderboard) {
+      if (r.arrow == null) r.arrow = '–';
+      if (r.pastRank == null) r.pastRank = null;
+      if (r.upset == null) r.upset = false;
+    }
+  }
 
   // Top-10 movers by absolute output $/1M delta (fallback to input magnitude).
   const topMovers = models
@@ -603,6 +647,10 @@ function renderPublicLeaderboardTable(data) {
       const effColor = '#27ae60'; // cheapest first → green
       const eff = r.effective == null ? '—' : '$' + changeMetric.trimNum(r.effective);
       const rpm = r.requestsPerMo == null ? '—' : fmtInt(r.requestsPerMo);
+      // v0.17 (#105): rank arrow vs 7d ago + $15-cap upset marker. Additive
+      // columns; missing data degrades to '–' / no marker.
+      const arrow = r.arrow === '▲' ? '▲' : r.arrow === '▼' ? '▼' : '–';
+      const upset = r.upset ? ' ⚠️ cap-upset' : '';
       return (
         `<tr>` +
         `<td class="rank">${i + 1}</td>` +
@@ -610,13 +658,14 @@ function renderPublicLeaderboardTable(data) {
         `<td class="num mono" style="color:${effColor};font-weight:600">${esc(eff)}/req</td>` +
         `<td>${fmtCapBadge(r.cap)}</td>` +
         `<td class="num mono">${esc(rpm)}</td>` +
+        `<td class="mono">${esc(arrow)}${esc(upset)}</td>` +
         `</tr>`
       );
     })
     .join('\n');
   return (
     `<table class="lb">` +
-    `<thead><tr><th>#</th><th>Model</th><th class="num">Eff $/req</th><th>Cap</th><th class="num">Req-mo</th></tr></thead>` +
+    `<thead><tr><th>#</th><th>Model</th><th class="num">Eff $/req</th><th>Cap</th><th class="num">Req-mo</th><th>7d</th></tr></thead>` +
     `<tbody>\n${rows}\n    </tbody>` +
     `</table>`
   );
