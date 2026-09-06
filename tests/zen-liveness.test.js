@@ -18,6 +18,7 @@ const {
   buildZenPricedSet,
   extractServingIds,
   computeWithdrawn,
+  computeShrinkage,
   classifyOutage,
   LIVENESS_URL,
   ZEN_LIVENESS_URL
@@ -79,7 +80,7 @@ test('zen urls are distinct (go vs zen provider base)', () => {
   assert.notStrictEqual(LIVENESS_URL, ZEN_LIVENESS_URL);
 });
 
-test('zen withdrawn detection (priced but absent -> warning line, own snapshot)', async () => {
+test('zen first run seeds baseline silently (no flood, own snapshot)', async () => {
   const d = tmpDir();
   try {
     setup(d);
@@ -88,11 +89,8 @@ test('zen withdrawn detection (priced but absent -> warning line, own snapshot)'
     const r = await runZenLivenessWatch(d, auth, { a: {}, b: {} }, 'ok', null);
     assert.strictEqual(r.status, 'ok');
     assert.deepStrictEqual(r.servingIds, ['a']);
-    assert.deepStrictEqual(r.withdrawn, ['b']);
-    assert.ok(
-      r.changes.some((c) => c.includes('priced but not serving: b')),
-      'expected withdrawn line, got: ' + JSON.stringify(r.changes)
-    );
+    assert.deepStrictEqual(r.withdrawn, []);
+    assert.deepStrictEqual(r.changes, []);
     assert.ok(!('cost' in r) && !('pricing' in r), 'liveness must not carry pricing');
     // Own snapshot file, Go files untouched.
     const zenSnap = JSON.parse(fs.readFileSync(path.join(d, 'liveness-zen-snapshot.json'), 'utf8'));
@@ -105,19 +103,33 @@ test('zen withdrawn detection (priced but absent -> warning line, own snapshot)'
   }
 });
 
-test('zen withdrawn supports free-list array input', async () => {
+test('zen shrinkage: was-serving now gone alerts on second run', async () => {
   const d = tmpDir();
   try {
     setup(d);
     const auth = writeAuthKey(d, 'sk-test');
+    mockZenFetch(['a', 'b']);
+    const r1 = await runZenLivenessWatch(d, auth, ['a', 'b'], 'ok', null);
+    assert.deepStrictEqual(r1.withdrawn, [], 'baseline run must not alert');
     mockZenFetch(['a']);
-    const r = await runZenLivenessWatch(d, auth, ['a', 'b'], 'ok', null);
-    assert.strictEqual(r.status, 'ok');
-    assert.deepStrictEqual(r.withdrawn, ['b']);
+    const r2 = await runZenLivenessWatch(d, auth, ['a', 'b'], 'ok', null);
+    assert.strictEqual(r2.status, 'ok');
+    assert.deepStrictEqual(r2.withdrawn, ['b']);
+    assert.ok(
+      r2.changes.some((c) => c.includes('b')),
+      'expected shrinkage line, got: ' + JSON.stringify(r2.changes)
+    );
   } finally {
     restoreFetch();
     fs.rmSync(d, { recursive: true, force: true });
   }
+});
+
+test('computeShrinkage is pure prior-minus-current', () => {
+  assert.deepStrictEqual(computeShrinkage(['a', 'b'], ['a']), ['b']);
+  assert.deepStrictEqual(computeShrinkage(['a'], ['a', 'b']), []);
+  assert.deepStrictEqual(computeShrinkage(null, ['a']), []);
+  assert.deepStrictEqual(computeShrinkage(['a'], null), ['a']);
 });
 
 test('zen ETag 304 returns unchanged from zen snapshot', async () => {
@@ -137,7 +149,8 @@ test('zen ETag 304 returns unchanged from zen snapshot', async () => {
     assert.strictEqual(r.status, 'unchanged');
     assert.ok(sawNoneMatch, 'expected If-None-Match to be sent');
     assert.deepStrictEqual(r.servingIds, ['a']);
-    assert.deepStrictEqual(r.withdrawn, ['b']);
+    // Shrinkage-only (#100): 304 means serving unchanged → no shrinkage.
+    assert.deepStrictEqual(r.withdrawn, []);
   } finally {
     restoreFetch();
     fs.rmSync(d, { recursive: true, force: true });
@@ -226,76 +239,61 @@ test('buildZenPricedSet unions billable + free, drops reserved keys', () => {
   assert.deepStrictEqual(buildZenPricedSet('nope', 42), []);
 });
 
-test('go-only model absent from zen serving does NOT alert', async () => {
+test('zen dedup uses bumped liveness-zen3 prefix (no stale suppression)', async () => {
   const d = tmpDir();
   try {
     setup(d);
     const auth = writeAuthKey(d, 'sk-test');
-    // Zen-priced set built the #98 way: Zen billable + free only. The Go-only
-    // model (hy3-style) is NOT a member, so its absence from Zen serving must
-    // not appear in withdrawn/changes.
-    const zenPriced = buildZenPricedSet(['zen-a', 'zen-b'], ['zen-free-free']);
-    mockZenFetch(['zen-a', 'zen-free-free']);
-    const r = await runZenLivenessWatch(d, auth, zenPriced, 'ok', null);
-    assert.strictEqual(r.status, 'ok');
-    assert.deepStrictEqual(r.withdrawn, ['zen-b']);
-    assert.ok(!r.withdrawn.includes('hy3'), 'Go-only model must never be Zen-withdrawn');
-    assert.ok(!r.changes.some((c) => c.includes('hy3')), 'Go-only model must never emit a Zen change line');
-  } finally {
-    restoreFetch();
-    fs.rmSync(d, { recursive: true, force: true });
-  }
-});
-
-test('zen-priced absent from zen serving DOES alert', async () => {
-  const d = tmpDir();
-  try {
-    setup(d);
-    const auth = writeAuthKey(d, 'sk-test');
-    const zenPriced = buildZenPricedSet({ 'zen-a': {}, 'zen-gone': {} }, []);
-    mockZenFetch(['zen-a']);
-    const r = await runZenLivenessWatch(d, auth, zenPriced, 'ok', null);
-    assert.deepStrictEqual(r.withdrawn, ['zen-gone']);
-    assert.ok(r.changes.some((c) => c.includes('priced but not serving: zen-gone')));
-  } finally {
-    restoreFetch();
-    fs.rmSync(d, { recursive: true, force: true });
-  }
-});
-
-test('free model absent from zen serving DOES alert', async () => {
-  const d = tmpDir();
-  try {
-    setup(d);
-    const auth = writeAuthKey(d, 'sk-test');
-    const zenPriced = buildZenPricedSet([], { 'zen-free-free': { cost: {} }, 'zen-kept-free': { cost: {} } });
-    mockZenFetch(['zen-kept-free']);
-    const r = await runZenLivenessWatch(d, auth, zenPriced, 'ok', null);
-    assert.deepStrictEqual(r.withdrawn, ['zen-free-free']);
-    assert.ok(r.changes.some((c) => c.includes('priced but not serving: zen-free-free')));
-  } finally {
-    restoreFetch();
-    fs.rmSync(d, { recursive: true, force: true });
-  }
-});
-
-test('zen dedup uses bumped liveness-zen2 prefix (no stale suppression)', async () => {
-  const d = tmpDir();
-  try {
-    setup(d);
-    const auth = writeAuthKey(d, 'sk-test');
+    // Baseline run seeds ['zen-a', 'zen-gone'] silently...
+    mockZenFetch(['zen-a', 'zen-gone']);
+    const r0 = await runZenLivenessWatch(d, auth, ['zen-a', 'zen-gone'], 'ok', null);
+    assert.deepStrictEqual(r0.withdrawn, []);
+    // ...then shrinkage of zen-gone alerts under the zen3 prefix.
     mockZenFetch(['zen-a']);
     const r = await runZenLivenessWatch(d, auth, ['zen-a', 'zen-gone'], 'ok', null);
     assert.deepStrictEqual(r.withdrawn, ['zen-gone']);
     const dedup = JSON.parse(fs.readFileSync(path.join(d, 'dedup.json'), 'utf8'));
     assert.ok(
-      Object.keys(dedup).includes('reserved:liveness-zen2:missing:zen-gone'),
+      Object.keys(dedup).includes('reserved:liveness-zen3:missing:zen-gone'),
       'expected bumped dedup key, got: ' + JSON.stringify(Object.keys(dedup))
     );
     assert.ok(
-      !Object.keys(dedup).some((k) => k === 'reserved:liveness-zen:missing:zen-gone'),
-      'old Go-scoped prefix must not be written'
+      !Object.keys(dedup).some((k) => k === 'reserved:liveness-zen2:missing:zen-gone'),
+      'old prefix must not be written'
     );
+    assert.ok(
+      !Object.keys(dedup).some((k) => k === 'reserved:liveness-zen:missing:zen-gone'),
+      'oldest prefix must not be written'
+    );
+  } finally {
+    restoreFetch();
+    fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('catalog divergence (102 priced, 29 serving) alerts nothing on baseline, then 1 removal alerts once', async () => {
+  const d = tmpDir();
+  try {
+    setup(d);
+    const auth = writeAuthKey(d, 'sk-test');
+    // 102 catalog ids vs 29 serving: pure divergence, not withdrawal.
+    const priced = Array.from({ length: 102 }, (_, i) => `model-${i}`);
+    const serving = Array.from({ length: 29 }, (_, i) => `model-${i}`);
+    mockZenFetch(serving);
+    const r1 = await runZenLivenessWatch(d, auth, priced, 'ok', null);
+    assert.strictEqual(r1.status, 'ok');
+    assert.deepStrictEqual(r1.withdrawn, [], 'divergence must not alert on baseline, got: ' + JSON.stringify(r1.withdrawn));
+    assert.deepStrictEqual(r1.changes, []);
+    // Second run with identical serving: still silent.
+    mockZenFetch(serving);
+    const r2 = await runZenLivenessWatch(d, auth, priced, 'ok', null);
+    assert.deepStrictEqual(r2.withdrawn, []);
+    // Removing 1 serving id → exactly 1 shrinkage alert.
+    const shrunk = serving.slice(1);
+    mockZenFetch(shrunk);
+    const r3 = await runZenLivenessWatch(d, auth, priced, 'ok', null);
+    assert.deepStrictEqual(r3.withdrawn, [serving[0]]);
+    assert.strictEqual(r3.changes.length, 1);
   } finally {
     restoreFetch();
     fs.rmSync(d, { recursive: true, force: true });
