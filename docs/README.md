@@ -4,11 +4,11 @@
 > pricing data only. It contains **no** usage, quota, credentials, or local
 > filesystem paths.
 
-Generated: 2026-09-05T23:01:58.137Z
+Generated: 2026-09-06T19:43:33.348Z
 
-- **37** model(s) tracked
-- **29** price-history sample(s)
-- **70** public pricing-change event(s)
+- **38** model(s) tracked
+- **49** price-history sample(s)
+- **90** public pricing-change event(s)
 
 ## Page sections (index.html)
 
@@ -22,7 +22,8 @@ Generated: 2026-09-05T23:01:58.137Z
    model, rows colored by direction. No per-model usage is published, so usage
    coloring is intentionally N/A (price-only).
 4. **Recent feed** — last 8-10 summarized price-change one-liners with change
-   metric, plus a link to the full public log (`changelog.json`).
+    metric, plus a link to the full public log (`changelog.json`,
+    `model_change` events only — warnings/info stay local).
 
 ## What is published
 
@@ -32,7 +33,7 @@ Generated: 2026-09-05T23:01:58.137Z
 | `pricing.json` | Allowlisted page data: 30-day deltas per model, graph series, top movers, recent feed |
 | `pricing-snapshot.json` | Latest public per-model pricing (cost / tiers / meta) |
 | `history.json` | Public per-sample pricing history |
-| `changelog.json` | Only `model_change` events (pricing changes) — linked as the "Full log" |
+| `changelog.json` | Only `model_change` events (pricing changes) — linked as the "Full log" (warnings/info stay local) |
 
 ## Regenerate locally
 
