@@ -12,7 +12,8 @@ const DEFAULTS = {
     pricing: 1800000,
     atom: 1800000,
     db: 600000,
-    releases: 86400000
+    releases: 86400000,
+    tracker: 21600000
   },
   delivery: {
     logFile: true,
@@ -26,7 +27,8 @@ const DEFAULTS = {
   feeds: {
     goPricing: 'https://github.com/anomalyco/opencode/commits/dev/packages/web/src/content/docs/go.mdx.atom',
     zenPricing: 'https://github.com/anomalyco/opencode/commits/dev/packages/web/src/content/docs/zen.mdx.atom',
-    releases: 'https://github.com/anomalyco/opencode/releases.atom'
+    releases: 'https://github.com/anomalyco/opencode/releases.atom',
+    tracker: 'https://github.com/all-the-rest/ocgo-price-tracker/commits/main.atom'
   }
 };
 
